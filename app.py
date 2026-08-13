@@ -14,7 +14,7 @@ st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wid
 st.title("📊 My AI Analyst Dashboard")
 
 # ------------------------------------------------
-# AIによる「ステータス判定・選定理由」を生成する関数
+# AIによる「ステータス判定・選定理由」を生成する関数（タブ1用）
 # ------------------------------------------------
 def generate_reason(row):
     reasons = []
@@ -135,7 +135,6 @@ with tab2:
             data_list = []
             rows_to_append = []
             
-            # 日本時間の取得
             now_jst = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y/%m/%d %H:%M')
             
             for sym in symbols_list:
@@ -157,14 +156,12 @@ with tab2:
                 try:
                     close = hist['Close'].iloc[-1]
                     
-                    # RSI (14日)
                     delta = hist['Close'].diff()
                     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                     rs = gain / loss
                     rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                     
-                    # MACD (12, 26, 9)
                     ema_fast = hist['Close'].ewm(span=12, adjust=False).mean()
                     ema_slow = hist['Close'].ewm(span=26, adjust=False).mean()
                     macd = ema_fast - ema_slow
@@ -178,17 +175,26 @@ with tab2:
                     else:
                         perf_w = np.nan
                         
-                    # 💡 【仮想売買の自動判定ルール】
+                    # 💡 【仮想売買の自動判定ルール ＋ 詳細な理由付け】
                     if rsi_val > 70:
-                        signal = "🔴【仮想売】過熱感（利確）"
+                        detail = f"RSIが{rsi_val:.1f}と過熱圏に達しました。利益確定を推奨します。"
+                        signal = f"🔴【仮想売】{detail}"
                     elif macd_val < sig_val:
-                        signal = "🔵【仮想売】デッドクロス（損切・撤退）"
+                        detail = f"MACDが下向きに交差（デッドクロス）しました。下落トレンド入りのサインのため撤退推奨です。"
+                        signal = f"🔵【仮想売】{detail}"
                     elif rsi_val < 45 and macd_val > sig_val:
-                        signal = "🟢【仮想買】押し目・MACD好転"
+                        detail = f"RSI{rsi_val:.1f}の割安水準でMACDが上向きました。絶好の押し目買いチャンスです。"
+                        signal = f"🟢【仮想買】{detail}"
                     else:
-                        signal = "⚪️【静観】"
+                        # 静観の「理由」をさらに細かく分析
+                        if rsi_val < 45:
+                            detail = f"RSIは{rsi_val:.1f}と売られすぎですが、MACDがまだ下向きのため反転確認待ちです。"
+                        elif macd_val > sig_val:
+                            detail = f"MACDは上向きですが、RSIが{rsi_val:.1f}であり新規買いの基準（45未満）には達していません。"
+                        else:
+                            detail = f"RSIが{rsi_val:.1f}で中立圏。MACDも方向感がなく、次の波を待つ局面です。"
+                        signal = f"⚪️【静観】{detail}"
                         
-                    # 画面表示用データ
                     data_list.append({
                         'ティッカー': sym,
                         '現在値($)': close,
@@ -199,7 +205,6 @@ with tab2:
                         '💡 AI判定': signal
                     })
                     
-                    # スプレッドシート記録用データ
                     row = [
                         now_jst,
                         sym,
@@ -214,7 +219,6 @@ with tab2:
                 except Exception as e:
                     pass
             
-            # --- スプレッドシートへの書き込み処理 ---
             if rows_to_append:
                 try:
                     creds_json = json.loads(st.secrets["google_sheets_creds"])
@@ -222,7 +226,6 @@ with tab2:
                     creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
                     client = gspread.authorize(creds)
                     
-                    # 🚨 ユーザー指定のGoogleスプレッドシートURL 🚨
                     sheet_url = "https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0" 
                     
                     sheet = client.open_by_url(sheet_url).sheet1
@@ -233,7 +236,6 @@ with tab2:
                 except Exception as e:
                     st.error(f"⚠️ スプレッドシートへの記録に失敗しました: {e}")
             
-            # --- 画面への結果表示 ---
             if data_list:
                 df2 = pd.DataFrame(data_list)
                 df2['現在値($)'] = df2['現在値($)'].round(2)
