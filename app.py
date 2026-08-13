@@ -3,7 +3,11 @@ import pandas as pd
 import numpy as np
 from tradingview_screener import Query, Column
 import yfinance as yf
-import time 
+import time
+import json
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime, timedelta
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -57,7 +61,7 @@ def generate_reason(row):
 tab1, tab2 = st.tabs(["🔍 全体スクリーニング", "🎯 個別銘柄トラッカー"])
 
 # ==========================================
-# タブ1：全体スクリーニング（TradingViewを使用）
+# タブ1：全体スクリーニング
 # ==========================================
 with tab1:
     st.write("日足（タイミング）・週足（トレンド）・ファンダ（割安性）を統合し、反発期待の銘柄を探します。")
@@ -88,57 +92,54 @@ with tab1:
                 df['PER(倍)'] = pd.to_numeric(df['PER(倍)'], errors='coerce').round(1)
                 
                 df['💡 AI判定'] = df.apply(generate_reason, axis=1)
-                
-                df_display = df[['ティッカー', '現在値($)', '日足RSI', '週足パフォーマンス(%)', 'PER(倍)', '💡 AI判定']]
                 st.success("分析完了！現在のスイング推奨銘柄です。")
-                st.dataframe(df_display, use_container_width=True)
+                st.dataframe(df[['ティッカー', '現在値($)', '日足RSI', '週足パフォーマンス(%)', 'PER(倍)', '💡 AI判定']], use_container_width=True)
             else:
                 st.warning("現在、厳しい条件を全て満たす銘柄は見つかりませんでした。")
 
 # ==========================================
-# タブ2：個別銘柄トラッカー（Yahoo Financeを使用）
+# タブ2：個別銘柄トラッカー ＆ スプレッドシート自動記録
 # ==========================================
 with tab2:
-    st.write("監視中の特定銘柄のテクニカル・ファンダメンタルズ状況をピンポイントで確認します。")
+    st.write("監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに自動記録**します。")
     
-    # --- 追加：スマホ用のかんたんリスト管理機能 ---
     if 'watch_list' not in st.session_state:
-        # 💡 アプリを開いた時の初期レギュラーメンバー（自由に変更可能）
         st.session_state.watch_list = ["SOXL", "RDW", "DNA", "FNGU"]
 
-    # 銘柄の追加用UI
     col1, col2 = st.columns([3, 1])
     with col1:
         new_ticker = st.text_input("➕ 新しい銘柄を追加", placeholder="例: NVDA")
     with col2:
-        st.write("") # ボタンの位置合わせ
+        st.write("") 
         st.write("")
         if st.button("追加する"):
             clean_ticker = new_ticker.strip().upper()
             if clean_ticker and clean_ticker not in st.session_state.watch_list:
                 st.session_state.watch_list.append(clean_ticker)
-                st.rerun() # 画面を再読み込みして即座に反映
+                st.rerun() 
     
-    # 削除用UI（タグ形式）
     selected = st.multiselect(
-        "📝 現在の監視リスト（スマホなら「×」をタップで削除）",
+        "📝 現在の監視リスト",
         options=st.session_state.watch_list,
         default=st.session_state.watch_list
     )
     
-    # 「×」で削除されたものを状態に反映
     if selected != st.session_state.watch_list:
         st.session_state.watch_list = selected
         st.rerun()
 
-    if st.button("🎯 監視銘柄の最新データを取得"):
-        with st.spinner('Yahoo Financeから最新データを取得・計算中...（数秒かかります）'):
+    # 🚀 取得＆自動記録ボタン
+    if st.button("🎯 最新データを取得 ＆ シートに仮想売買を記録"):
+        with st.spinner('データを取得・計算し、スプレッドシートに記録中...'):
             symbols_list = st.session_state.watch_list
             data_list = []
+            rows_to_append = []
+            
+            # 日本時間の取得
+            now_jst = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y/%m/%d %H:%M')
             
             for sym in symbols_list:
                 hist = pd.DataFrame()
-                
                 for attempt in range(3):
                     try:
                         ticker = yf.Ticker(sym)
@@ -156,12 +157,14 @@ with tab2:
                 try:
                     close = hist['Close'].iloc[-1]
                     
+                    # RSI (14日)
                     delta = hist['Close'].diff()
                     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                     rs = gain / loss
                     rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                     
+                    # MACD (12, 26, 9)
                     ema_fast = hist['Close'].ewm(span=12, adjust=False).mean()
                     ema_slow = hist['Close'].ewm(span=26, adjust=False).mean()
                     macd = ema_fast - ema_slow
@@ -175,8 +178,17 @@ with tab2:
                     else:
                         perf_w = np.nan
                         
-                    per = ticker.info.get('trailingPE', np.nan) if hasattr(ticker, 'info') else np.nan
-                    
+                    # 💡 【仮想売買の自動判定ルール】
+                    if rsi_val > 70:
+                        signal = "🔴【仮想売】過熱感（利確）"
+                    elif macd_val < sig_val:
+                        signal = "🔵【仮想売】デッドクロス（損切・撤退）"
+                    elif rsi_val < 45 and macd_val > sig_val:
+                        signal = "🟢【仮想買】押し目・MACD好転"
+                    else:
+                        signal = "⚪️【静観】"
+                        
+                    # 画面表示用データ
                     data_list.append({
                         'ティッカー': sym,
                         '現在値($)': close,
@@ -184,23 +196,48 @@ with tab2:
                         '日足MACD': macd_val,
                         '日足シグナル': sig_val,
                         '週足パフォーマンス(%)': perf_w,
-                        'PER(倍)': per
+                        '💡 AI判定': signal
                     })
+                    
+                    # スプレッドシート記録用データ
+                    row = [
+                        now_jst,
+                        sym,
+                        round(close, 2),
+                        round(rsi_val, 1),
+                        round(macd_val, 2),
+                        round(perf_w, 1) if pd.notna(perf_w) else "",
+                        signal
+                    ]
+                    rows_to_append.append(row)
+                    
                 except Exception as e:
                     pass
             
+            # --- スプレッドシートへの書き込み処理 ---
+            if rows_to_append:
+                try:
+                    creds_json = json.loads(st.secrets["google_sheets_creds"])
+                    scopes = ['https://www.googleapis.com/auth/spreadsheets']
+                    creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
+                    client = gspread.authorize(creds)
+                    
+                    # 🚨 ユーザー指定のGoogleスプレッドシートURL 🚨
+                    sheet_url = "https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0" 
+                    
+                    sheet = client.open_by_url(sheet_url).sheet1
+                    for row in rows_to_append:
+                        sheet.append_row(row)
+                        
+                    st.success("✅ データ取得 ＆ スプレッドシートへの記録が完了しました！")
+                except Exception as e:
+                    st.error(f"⚠️ スプレッドシートへの記録に失敗しました: {e}")
+            
+            # --- 画面への結果表示 ---
             if data_list:
                 df2 = pd.DataFrame(data_list)
-                
                 df2['現在値($)'] = df2['現在値($)'].round(2)
                 df2['日足RSI'] = pd.to_numeric(df2['日足RSI'], errors='coerce').round(1)
                 df2['週足パフォーマンス(%)'] = pd.to_numeric(df2['週足パフォーマンス(%)'], errors='coerce').round(1)
-                df2['PER(倍)'] = pd.to_numeric(df2['PER(倍)'], errors='coerce').round(1)
-
-                df2['💡 現在のステータス'] = df2.apply(generate_reason, axis=1)
                 
-                df2_display = df2[['ティッカー', '現在値($)', '日足RSI', '週足パフォーマンス(%)', 'PER(倍)', '💡 現在のステータス']]
-                st.success("取得完了！監視銘柄の現在の状況です。")
-                st.dataframe(df2_display, use_container_width=True)
-            else:
-                st.warning("現在、データは取得できませんでした。")
+                st.dataframe(df2[['ティッカー', '現在値($)', '日足RSI', '週足パフォーマンス(%)', '💡 AI判定']], use_container_width=True)
