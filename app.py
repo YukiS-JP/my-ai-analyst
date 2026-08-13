@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from tradingview_screener import Query, Column
 import yfinance as yf
-import time # 👈 リトライのために時間を少し空けるツールを追加
+import time 
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -101,24 +101,51 @@ with tab1:
 with tab2:
     st.write("監視中の特定銘柄のテクニカル・ファンダメンタルズ状況をピンポイントで確認します。")
     
-    target_symbols = st.text_input("確認したいティッカーをカンマ区切りで入力してください", value="SOXL, RDW, DNA, FNGU")
+    # --- 追加：スマホ用のかんたんリスト管理機能 ---
+    if 'watch_list' not in st.session_state:
+        # 💡 アプリを開いた時の初期レギュラーメンバー（自由に変更可能）
+        st.session_state.watch_list = ["SOXL", "RDW", "DNA", "FNGU"]
+
+    # 銘柄の追加用UI
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        new_ticker = st.text_input("➕ 新しい銘柄を追加", placeholder="例: NVDA")
+    with col2:
+        st.write("") # ボタンの位置合わせ
+        st.write("")
+        if st.button("追加する"):
+            clean_ticker = new_ticker.strip().upper()
+            if clean_ticker and clean_ticker not in st.session_state.watch_list:
+                st.session_state.watch_list.append(clean_ticker)
+                st.rerun() # 画面を再読み込みして即座に反映
     
+    # 削除用UI（タグ形式）
+    selected = st.multiselect(
+        "📝 現在の監視リスト（スマホなら「×」をタップで削除）",
+        options=st.session_state.watch_list,
+        default=st.session_state.watch_list
+    )
+    
+    # 「×」で削除されたものを状態に反映
+    if selected != st.session_state.watch_list:
+        st.session_state.watch_list = selected
+        st.rerun()
+
     if st.button("🎯 監視銘柄の最新データを取得"):
         with st.spinner('Yahoo Financeから最新データを取得・計算中...（数秒かかります）'):
-            symbols_list = [s.strip().upper() for s in target_symbols.split(",") if s.strip()]
+            symbols_list = st.session_state.watch_list
             data_list = []
             
             for sym in symbols_list:
                 hist = pd.DataFrame()
                 
-                # --- リトライ機能（SOXL対策：3回まで挑戦する） ---
                 for attempt in range(3):
                     try:
                         ticker = yf.Ticker(sym)
                         hist = ticker.history(period="6mo")
                         if not hist.empty:
-                            break # データが取れたらループを抜ける
-                        time.sleep(0.5) # 0.5秒待ってから再挑戦
+                            break 
+                        time.sleep(0.5) 
                     except:
                         time.sleep(0.5)
                         
@@ -129,14 +156,12 @@ with tab2:
                 try:
                     close = hist['Close'].iloc[-1]
                     
-                    # 独自にRSIを計算（14日）
                     delta = hist['Close'].diff()
                     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                     rs = gain / loss
                     rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                     
-                    # 独自にMACDを計算（12, 26, 9）
                     ema_fast = hist['Close'].ewm(span=12, adjust=False).mean()
                     ema_slow = hist['Close'].ewm(span=26, adjust=False).mean()
                     macd = ema_fast - ema_slow
@@ -145,13 +170,11 @@ with tab2:
                     macd_val = macd.iloc[-1]
                     sig_val = macd_signal.iloc[-1]
                     
-                    # 週足パフォーマンス（直近5営業日の変化率）
                     if len(hist) >= 6:
                         perf_w = ((close - hist['Close'].iloc[-6]) / hist['Close'].iloc[-6]) * 100
                     else:
                         perf_w = np.nan
                         
-                    # ファンダメンタルズ（PER）
                     per = ticker.info.get('trailingPE', np.nan) if hasattr(ticker, 'info') else np.nan
                     
                     data_list.append({
@@ -180,4 +203,4 @@ with tab2:
                 st.success("取得完了！監視銘柄の現在の状況です。")
                 st.dataframe(df2_display, use_container_width=True)
             else:
-                st.warning("入力された銘柄のデータが見つかりませんでした。ティッカーが正しいか確認してください。")
+                st.warning("現在、データは取得できませんでした。")
