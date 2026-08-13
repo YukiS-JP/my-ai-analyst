@@ -13,14 +13,12 @@ st.title("📊 My AI Analyst Dashboard")
 def generate_reason(row):
     reasons = []
     
-    # データが空の場合に備えて数値に変換（エラー時はNaNにする安全装置）
     rsi = pd.to_numeric(row.get('日足RSI'), errors='coerce')
     macd = pd.to_numeric(row.get('日足MACD'), errors='coerce')
     sig = pd.to_numeric(row.get('日足シグナル'), errors='coerce')
     perf = pd.to_numeric(row.get('週足パフォーマンス(%)'), errors='coerce')
     per = pd.to_numeric(row.get('PER(倍)'), errors='coerce')
     
-    # ①日足のテクニカル
     if pd.notna(rsi):
         if rsi < 35:
             reasons.append(f"日足RSIが{rsi:.1f}と極度の売られすぎ水準です。")
@@ -33,14 +31,12 @@ def generate_reason(row):
         if macd > sig:
             reasons.append("MACD好転（買いシグナル）点灯中。")
 
-    # ②週足のトレンド
     if pd.notna(perf):
         if perf > 0:
             reasons.append("週足トレンドは上向きを維持。")
         else:
             reasons.append("週足は調整局面（スイング底打ち狙い）。")
 
-    # ③ファンダメンタルズ（PER）※ETFなどPERがない場合はスキップ
     if pd.notna(per) and per > 0:
         if per < 15:
             reasons.append(f"PER{per:.1f}倍で非常に割安な水準です。")
@@ -82,7 +78,6 @@ with tab1:
                 df = df[['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']]
                 df.columns = ['ティッカー', '現在値($)', '日足RSI', '日足MACD', '日足シグナル', '週足パフォーマンス(%)', 'PER(倍)']
                 
-                # エラー回避のため確実に数値に変換してから丸める
                 df['日足RSI'] = pd.to_numeric(df['日足RSI'], errors='coerce').round(1)
                 df['週足パフォーマンス(%)'] = pd.to_numeric(df['週足パフォーマンス(%)'], errors='coerce').round(1)
                 df['PER(倍)'] = pd.to_numeric(df['PER(倍)'], errors='coerce').round(1)
@@ -106,18 +101,23 @@ with tab2:
     if st.button("🎯 監視銘柄の最新データを取得"):
         with st.spinner('指定された銘柄のデータを取得中...'):
             symbols_list = [s.strip().upper() for s in target_symbols.split(",")]
+            columns_to_fetch = ['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']
             
-            q2 = (Query()
-                 .select('name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm')
-                 .where(Column('name').isin(symbols_list)))
+            # ① 一般企業株（RDW, DNAなど）を探す
+            q_stock = (Query().select(*columns_to_fetch).where(Column('name').isin(symbols_list)))
+            df_stock = q_stock.set_markets('america').get_scanner_data()[1]
             
-            df2 = q2.set_markets('america').get_scanner_data()[1]
+            # ② ETF・ETN（SOXL, FNGUなど）を探す（screenerを'america_fund'に指定）
+            q_fund = (Query().screener('america_fund').select(*columns_to_fetch).where(Column('name').isin(symbols_list)))
+            df_fund = q_fund.get_scanner_data()[1]
+            
+            # ③ 見つかった両方のデータをガッチャンコして合体させる
+            df2 = pd.concat([df_stock, df_fund], ignore_index=True)
             
             if not df2.empty:
                 df2 = df2[['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']]
                 df2.columns = ['ティッカー', '現在値($)', '日足RSI', '日足MACD', '日足シグナル', '週足パフォーマンス(%)', 'PER(倍)']
                 
-                # エラー回避のため確実に数値に変換してから丸める
                 df2['日足RSI'] = pd.to_numeric(df2['日足RSI'], errors='coerce').round(1)
                 df2['週足パフォーマンス(%)'] = pd.to_numeric(df2['週足パフォーマンス(%)'], errors='coerce').round(1)
                 df2['PER(倍)'] = pd.to_numeric(df2['PER(倍)'], errors='coerce').round(1)
