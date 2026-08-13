@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from tradingview_screener import Query, Column
-import requests # ← ツールを無視して直接通信するための機能を追加！
+import requests
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -107,19 +107,28 @@ with tab2:
             symbols_list = [s.strip().upper() for s in target_symbols.split(",")]
             columns_to_fetch = ['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']
             
-            # --- 確実なデータ取得のためにTradingViewサーバーへ直接通信 ---
+            # --- セキュリティブロックを突破するための通信設定 ---
             def fetch_tv(screener_type):
+                url = f"https://scanner.tradingview.com/{screener_type}/scan"
                 payload = {
                     "filter": [{"left": "name", "operation": "in", "right": symbols_list}],
                     "columns": columns_to_fetch
                 }
+                # ここが突破の鍵！「MacのChromeからアクセスしています」と偽装する
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Content-Type": "application/json"
+                }
                 try:
-                    res = requests.post(f"https://scanner.tradingview.com/{screener_type}/scan", json=payload)
-                    data = res.json().get('data', [])
-                    if data:
-                        return pd.DataFrame([d['d'] for d in data], columns=columns_to_fetch)
-                except Exception:
-                    pass
+                    res = requests.post(url, json=payload, headers=headers, timeout=10)
+                    if res.status_code == 200:
+                        data = res.json().get('data', [])
+                        if data:
+                            return pd.DataFrame([d['d'] for d in data], columns=columns_to_fetch)
+                    else:
+                        st.error(f"⚠️ {screener_type} データ取得失敗: HTTPエラー {res.status_code} (ブロックされています)")
+                except Exception as e:
+                    st.error(f"⚠️ {screener_type} 通信エラー: {e}")
                 return pd.DataFrame()
             
             # ① 一般企業株（RDW, DNAなど）を取得
