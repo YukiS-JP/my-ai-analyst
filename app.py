@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from tradingview_screener import Query, Column
-import requests
+import yfinance as yf # 👈 新たにYahoo Financeのデータを取得するツールを追加
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -56,7 +56,7 @@ def generate_reason(row):
 tab1, tab2 = st.tabs(["🔍 全体スクリーニング", "🎯 個別銘柄トラッカー"])
 
 # ==========================================
-# タブ1：全体スクリーニング（条件で探す）
+# タブ1：全体スクリーニング（TradingViewを使用）
 # ==========================================
 with tab1:
     st.write("日足（タイミング）・週足（トレンド）・ファンダ（割安性）を統合し、反発期待の銘柄を探します。")
@@ -95,7 +95,7 @@ with tab1:
                 st.warning("現在、厳しい条件を全て満たす銘柄は見つかりませんでした。")
 
 # ==========================================
-# タブ2：個別銘柄トラッカー（指定した銘柄を追う）
+# タブ2：個別銘柄トラッカー（Yahoo Financeを使用）
 # ==========================================
 with tab2:
     st.write("監視中の特定銘柄のテクニカル・ファンダメンタルズ状況をピンポイントで確認します。")
@@ -103,42 +103,61 @@ with tab2:
     target_symbols = st.text_input("確認したいティッカーをカンマ区切りで入力してください", value="SOXL, RDW, DNA, FNGU")
     
     if st.button("🎯 監視銘柄の最新データを取得"):
-        with st.spinner('指定された銘柄のデータを取得中...'):
+        with st.spinner('Yahoo Financeから最新データを取得・計算中...'):
             symbols_list = [s.strip().upper() for s in target_symbols.split(",") if s.strip()]
-            columns_to_fetch = ['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']
+            data_list = []
             
-            # --- 完璧なフォーマットでTradingViewサーバーへ一括要求 ---
-            url = "https://scanner.tradingview.com/america/scan"
+            for sym in symbols_list:
+                try:
+                    # 過去半年の株価データを取得
+                    ticker = yf.Ticker(sym)
+                    hist = ticker.history(period="6mo")
+                    if hist.empty:
+                        continue
+                        
+                    close = hist['Close'].iloc[-1]
+                    
+                    # 独自にRSIを計算（14日）
+                    delta = hist['Close'].diff()
+                    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                    rs = gain / loss
+                    rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
+                    
+                    # 独自にMACDを計算（12, 26, 9）
+                    ema_fast = hist['Close'].ewm(span=12, adjust=False).mean()
+                    ema_slow = hist['Close'].ewm(span=26, adjust=False).mean()
+                    macd = ema_fast - ema_slow
+                    macd_signal = macd.ewm(span=9, adjust=False).mean()
+                    
+                    macd_val = macd.iloc[-1]
+                    sig_val = macd_signal.iloc[-1]
+                    
+                    # 週足パフォーマンス（直近5営業日の変化率）
+                    if len(hist) >= 6:
+                        perf_w = ((close - hist['Close'].iloc[-6]) / hist['Close'].iloc[-6]) * 100
+                    else:
+                        perf_w = np.nan
+                        
+                    # ファンダメンタルズ（PER）※ETFには無い場合がある
+                    per = ticker.info.get('trailingPE', np.nan)
+                    
+                    data_list.append({
+                        'ティッカー': sym,
+                        '現在値($)': close,
+                        '日足RSI': rsi_val,
+                        '日足MACD': macd_val,
+                        '日足シグナル': sig_val,
+                        '週足パフォーマンス(%)': perf_w,
+                        'PER(倍)': per
+                    })
+                except Exception as e:
+                    pass
             
-            # 【解決策】marketsとtypesを明記することで、株とETFの両方を同時に取得
-            payload = {
-                "markets": ["america"],
-                "symbols": {"query": {"types": []}, "tickers": []},
-                "columns": columns_to_fetch,
-                "filter": [{"left": "name", "operation": "in", "right": symbols_list}]
-            }
-            
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Content-Type": "application/json"
-            }
-            
-            df2 = pd.DataFrame()
-            try:
-                res = requests.post(url, json=payload, headers=headers, timeout=10)
-                if res.status_code == 200:
-                    data = res.json().get('data', [])
-                    if data:
-                        df2 = pd.DataFrame([d['d'] for d in data], columns=columns_to_fetch)
-                else:
-                    st.error(f"⚠️ サーバーエラー: HTTP {res.status_code}")
-            except Exception as e:
-                st.error(f"⚠️ 通信エラー: {e}")
-            
-            # データの表示処理
-            if not df2.empty:
-                df2.columns = ['ティッカー', '現在値($)', '日足RSI', '日足MACD', '日足シグナル', '週足パフォーマンス(%)', 'PER(倍)']
+            if data_list:
+                df2 = pd.DataFrame(data_list)
                 
+                df2['現在値($)'] = df2['現在値($)'].round(2)
                 df2['日足RSI'] = pd.to_numeric(df2['日足RSI'], errors='coerce').round(1)
                 df2['週足パフォーマンス(%)'] = pd.to_numeric(df2['週足パフォーマンス(%)'], errors='coerce').round(1)
                 df2['PER(倍)'] = pd.to_numeric(df2['PER(倍)'], errors='coerce').round(1)
