@@ -72,7 +72,10 @@ with tab1:
                  .order_by('RSI', ascending=True)
                  .limit(10))
             
-            df = q.set_markets('america').get_scanner_data()[1]
+            try:
+                df = q.set_markets('america').get_scanner_data()[1]
+            except Exception:
+                df = pd.DataFrame()
             
             if not df.empty:
                 df = df[['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']]
@@ -103,18 +106,28 @@ with tab2:
             symbols_list = [s.strip().upper() for s in target_symbols.split(",")]
             columns_to_fetch = ['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']
             
-            # ① 一般企業株（RDW, DNAなど）を探す
-            q_stock = (Query().select(*columns_to_fetch).where(Column('name').isin(symbols_list)))
-            df_stock = q_stock.set_markets('america').get_scanner_data()[1]
+            df_stock = pd.DataFrame()
+            df_fund = pd.DataFrame()
             
-            # ② ETF・ETN（SOXL, FNGUなど）を探す（screenerを'america_fund'に指定）
-            q_fund = (Query().screener('america_fund').select(*columns_to_fetch).where(Column('name').isin(symbols_list)))
-            df_fund = q_fund.get_scanner_data()[1]
+            # ① 一般企業株（RDW, DNAなど）を探す
+            try:
+                q_stock = (Query().select(*columns_to_fetch).where(Column('name').isin(symbols_list)))
+                df_stock = q_stock.set_markets('america').get_scanner_data()[1]
+            except Exception:
+                pass
+                
+            # ② ETF・ETN（SOXL, FNGUなど）を探す（修正箇所：set_marketsを使用）
+            try:
+                q_fund = (Query().select(*columns_to_fetch).where(Column('name').isin(symbols_list)))
+                df_fund = q_fund.set_markets('america_fund').get_scanner_data()[1]
+            except Exception:
+                pass
             
             # ③ 見つかった両方のデータをガッチャンコして合体させる
-            df2 = pd.concat([df_stock, df_fund], ignore_index=True)
+            frames = [df for df in [df_stock, df_fund] if not df.empty]
             
-            if not df2.empty:
+            if frames:
+                df2 = pd.concat(frames, ignore_index=True)
                 df2 = df2[['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']]
                 df2.columns = ['ティッカー', '現在値($)', '日足RSI', '日足MACD', '日足シグナル', '週足パフォーマンス(%)', 'PER(倍)']
                 
