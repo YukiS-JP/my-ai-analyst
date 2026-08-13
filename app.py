@@ -14,7 +14,7 @@ st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wid
 st.title("📊 My AI Analyst Dashboard")
 
 # ------------------------------------------------
-# AIによる「ステータス判定・選定理由」を生成する関数（タブ1用）
+# AIによる「ステータス判定・選定理由」を生成する関数
 # ------------------------------------------------
 def generate_reason(row):
     reasons = []
@@ -93,7 +93,15 @@ with tab1:
                 
                 df['💡 AI判定'] = df.apply(generate_reason, axis=1)
                 st.success("分析完了！現在のスイング推奨銘柄です。")
-                st.dataframe(df[['ティッカー', '現在値($)', '日足RSI', '週足パフォーマンス(%)', 'PER(倍)', '💡 AI判定']], use_container_width=True)
+                
+                # 🛠️ 表の「💡 AI判定」列の幅を広げる設定を追加
+                st.dataframe(
+                    df[['ティッカー', '現在値($)', '日足RSI', '週足パフォーマンス(%)', 'PER(倍)', '💡 AI判定']],
+                    use_container_width=True,
+                    column_config={
+                        "💡 AI判定": st.column_config.TextColumn(width="large")
+                    }
+                )
             else:
                 st.warning("現在、厳しい条件を全て満たす銘柄は見つかりませんでした。")
 
@@ -186,7 +194,6 @@ with tab2:
                         detail = f"RSI{rsi_val:.1f}の割安水準でMACDが上向きました。絶好の押し目買いチャンスです。"
                         signal = f"🟢【仮想買】{detail}"
                     else:
-                        # 静観の「理由」をさらに細かく分析
                         if rsi_val < 45:
                             detail = f"RSIは{rsi_val:.1f}と売られすぎですが、MACDがまだ下向きのため反転確認待ちです。"
                         elif macd_val > sig_val:
@@ -242,4 +249,11 @@ with tab2:
                 df2['日足RSI'] = pd.to_numeric(df2['日足RSI'], errors='coerce').round(1)
                 df2['週足パフォーマンス(%)'] = pd.to_numeric(df2['週足パフォーマンス(%)'], errors='coerce').round(1)
                 
-                st.dataframe(df2[['ティッカー', '現在値($)', '日足RSI', '週足パフォーマンス(%)', '💡 AI判定']], use_container_width=True)
+                # 🛠️ 表の「💡 AI判定」列の幅を広げる設定を追加
+                st.dataframe(
+                    df2[['ティッカー', '現在値($)', '日足RSI', '週足パフォーマンス(%)', '💡 AI判定']],
+                    use_container_width=True,
+                    column_config={
+                        "💡 AI判定": st.column_config.TextColumn(width="large")
+                    }
+                )
