@@ -104,43 +104,39 @@ with tab2:
     
     if st.button("🎯 監視銘柄の最新データを取得"):
         with st.spinner('指定された銘柄のデータを取得中...'):
-            symbols_list = [s.strip().upper() for s in target_symbols.split(",")]
+            symbols_list = [s.strip().upper() for s in target_symbols.split(",") if s.strip()]
             columns_to_fetch = ['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']
             
-            # --- セキュリティブロックを突破するための通信設定 ---
-            def fetch_tv(screener_type):
-                url = f"https://scanner.tradingview.com/{screener_type}/scan"
-                payload = {
-                    "filter": [{"left": "name", "operation": "in", "right": symbols_list}],
-                    "columns": columns_to_fetch
-                }
-                # ここが突破の鍵！「MacのChromeからアクセスしています」と偽装する
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Content-Type": "application/json"
-                }
-                try:
-                    res = requests.post(url, json=payload, headers=headers, timeout=10)
-                    if res.status_code == 200:
-                        data = res.json().get('data', [])
-                        if data:
-                            return pd.DataFrame([d['d'] for d in data], columns=columns_to_fetch)
-                    else:
-                        st.error(f"⚠️ {screener_type} データ取得失敗: HTTPエラー {res.status_code} (ブロックされています)")
-                except Exception as e:
-                    st.error(f"⚠️ {screener_type} 通信エラー: {e}")
-                return pd.DataFrame()
+            # --- 完璧なフォーマットでTradingViewサーバーへ一括要求 ---
+            url = "https://scanner.tradingview.com/america/scan"
             
-            # ① 一般企業株（RDW, DNAなど）を取得
-            df_stock = fetch_tv("america")
-            # ② ETF・ETN（SOXL, FNGUなど）を取得
-            df_fund = fetch_tv("america_fund")
+            # 【解決策】marketsとtypesを明記することで、株とETFの両方を同時に取得
+            payload = {
+                "markets": ["america"],
+                "symbols": {"query": {"types": []}, "tickers": []},
+                "columns": columns_to_fetch,
+                "filter": [{"left": "name", "operation": "in", "right": symbols_list}]
+            }
             
-            # ③ 見つかったデータを合体
-            frames = [df for df in [df_stock, df_fund] if not df.empty]
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Content-Type": "application/json"
+            }
             
-            if frames:
-                df2 = pd.concat(frames, ignore_index=True)
+            df2 = pd.DataFrame()
+            try:
+                res = requests.post(url, json=payload, headers=headers, timeout=10)
+                if res.status_code == 200:
+                    data = res.json().get('data', [])
+                    if data:
+                        df2 = pd.DataFrame([d['d'] for d in data], columns=columns_to_fetch)
+                else:
+                    st.error(f"⚠️ サーバーエラー: HTTP {res.status_code}")
+            except Exception as e:
+                st.error(f"⚠️ 通信エラー: {e}")
+            
+            # データの表示処理
+            if not df2.empty:
                 df2.columns = ['ティッカー', '現在値($)', '日足RSI', '日足MACD', '日足シグナル', '週足パフォーマンス(%)', 'PER(倍)']
                 
                 df2['日足RSI'] = pd.to_numeric(df2['日足RSI'], errors='coerce').round(1)
