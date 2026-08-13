@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from tradingview_screener import Query, Column
-import yfinance as yf # 👈 新たにYahoo Financeのデータを取得するツールを追加
+import yfinance as yf
+import time # 👈 リトライのために時間を少し空けるツールを追加
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -103,18 +104,29 @@ with tab2:
     target_symbols = st.text_input("確認したいティッカーをカンマ区切りで入力してください", value="SOXL, RDW, DNA, FNGU")
     
     if st.button("🎯 監視銘柄の最新データを取得"):
-        with st.spinner('Yahoo Financeから最新データを取得・計算中...'):
+        with st.spinner('Yahoo Financeから最新データを取得・計算中...（数秒かかります）'):
             symbols_list = [s.strip().upper() for s in target_symbols.split(",") if s.strip()]
             data_list = []
             
             for sym in symbols_list:
-                try:
-                    # 過去半年の株価データを取得
-                    ticker = yf.Ticker(sym)
-                    hist = ticker.history(period="6mo")
-                    if hist.empty:
-                        continue
+                hist = pd.DataFrame()
+                
+                # --- リトライ機能（SOXL対策：3回まで挑戦する） ---
+                for attempt in range(3):
+                    try:
+                        ticker = yf.Ticker(sym)
+                        hist = ticker.history(period="6mo")
+                        if not hist.empty:
+                            break # データが取れたらループを抜ける
+                        time.sleep(0.5) # 0.5秒待ってから再挑戦
+                    except:
+                        time.sleep(0.5)
                         
+                if hist.empty:
+                    st.warning(f"{sym} のデータ取得に失敗しました。")
+                    continue
+                    
+                try:
                     close = hist['Close'].iloc[-1]
                     
                     # 独自にRSIを計算（14日）
@@ -139,8 +151,8 @@ with tab2:
                     else:
                         perf_w = np.nan
                         
-                    # ファンダメンタルズ（PER）※ETFには無い場合がある
-                    per = ticker.info.get('trailingPE', np.nan)
+                    # ファンダメンタルズ（PER）
+                    per = ticker.info.get('trailingPE', np.nan) if hasattr(ticker, 'info') else np.nan
                     
                     data_list.append({
                         'ティッカー': sym,
