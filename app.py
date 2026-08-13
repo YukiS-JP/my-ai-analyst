@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from tradingview_screener import Query, Column
+import requests # ← ツールを無視して直接通信するための機能を追加！
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -106,29 +107,31 @@ with tab2:
             symbols_list = [s.strip().upper() for s in target_symbols.split(",")]
             columns_to_fetch = ['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']
             
-            df_stock = pd.DataFrame()
-            df_fund = pd.DataFrame()
+            # --- 確実なデータ取得のためにTradingViewサーバーへ直接通信 ---
+            def fetch_tv(screener_type):
+                payload = {
+                    "filter": [{"left": "name", "operation": "in", "right": symbols_list}],
+                    "columns": columns_to_fetch
+                }
+                try:
+                    res = requests.post(f"https://scanner.tradingview.com/{screener_type}/scan", json=payload)
+                    data = res.json().get('data', [])
+                    if data:
+                        return pd.DataFrame([d['d'] for d in data], columns=columns_to_fetch)
+                except Exception:
+                    pass
+                return pd.DataFrame()
             
-            # ① 一般企業株（RDW, DNAなど）を探す
-            try:
-                q_stock = (Query().select(*columns_to_fetch).where(Column('name').isin(symbols_list)))
-                df_stock = q_stock.set_markets('america').get_scanner_data()[1]
-            except Exception:
-                pass
-                
-            # ② ETF・ETN（SOXL, FNGUなど）を探す（修正箇所：set_marketsを使用）
-            try:
-                q_fund = (Query().select(*columns_to_fetch).where(Column('name').isin(symbols_list)))
-                df_fund = q_fund.set_markets('america_fund').get_scanner_data()[1]
-            except Exception:
-                pass
+            # ① 一般企業株（RDW, DNAなど）を取得
+            df_stock = fetch_tv("america")
+            # ② ETF・ETN（SOXL, FNGUなど）を取得
+            df_fund = fetch_tv("america_fund")
             
-            # ③ 見つかった両方のデータをガッチャンコして合体させる
+            # ③ 見つかったデータを合体
             frames = [df for df in [df_stock, df_fund] if not df.empty]
             
             if frames:
                 df2 = pd.concat(frames, ignore_index=True)
-                df2 = df2[['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']]
                 df2.columns = ['ティッカー', '現在値($)', '日足RSI', '日足MACD', '日足シグナル', '週足パフォーマンス(%)', 'PER(倍)']
                 
                 df2['日足RSI'] = pd.to_numeric(df2['日足RSI'], errors='coerce').round(1)
