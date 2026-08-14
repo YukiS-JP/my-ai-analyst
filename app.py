@@ -37,6 +37,10 @@ if 'macro_dict' not in st.session_state:
 if 'macro_display_list' not in st.session_state:
     st.session_state.macro_display_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
 
+# 🌟 ポートフォリオ用のセッションステートを追加
+if 'portfolio' not in st.session_state:
+    st.session_state.portfolio = {} # {'SOXL': {'avg_price': 30.0, 'qty': 100}}
+
 # ------------------------------------------------
 # AIによる「ステータス判定・選定理由」を生成する関数
 # ------------------------------------------------
@@ -85,7 +89,7 @@ def generate_reason(row):
 tab_top, tab1, tab2, tab3 = st.tabs(["🏠 トップ", "🔍 スクリーニング", "🎯 トラッカー", "📰 ニュース"])
 
 # ==========================================
-# 🌟 トップ（電光掲示板風サマリー ＆ D&D並び替え機能）
+# 🌟 トップ（電光掲示板風サマリー ＆ ポートフォリオ機能）
 # ==========================================
 with tab_top:
     st.markdown("""
@@ -99,6 +103,7 @@ with tab_top:
                 font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
                 margin-bottom: 25px;
             }
+            .panel-header { color: #82B1FF; margin-top: 0; margin-bottom: 12px; font-size: 18px; border-bottom: 1px solid #2D303E; padding-bottom: 8px;}
             .item-row { margin: 8px 0; color: #EEEEEE; font-size: 15px;}
             .item-sub-row { margin: 2px 0 12px 18px; color: #BBBBBB; font-size: 14px; line-height: 1.6;}
             .val-up { color: #00E676; font-weight: bold;}
@@ -107,52 +112,137 @@ with tab_top:
             .sym-title { font-weight: bold; font-size: 16px; color: #FFFFFF; margin-top: 15px;}
         </style>
     """, unsafe_allow_html=True)
-    
-    # --- 🌍 主要市場サマリー セクション ---
-    col1, col2 = st.columns([5, 1])
-    with col1:
-        st.subheader("🌍 主要市場サマリー")
-    with col2:
-        with st.popover("⚙️ 編集"):
-            st.markdown("**1️⃣ 新しい指標の追加**")
-            new_macro_name = st.text_input("📝 表示名 (例: SOX指数)", placeholder="半導体指数", key="mac_name")
-            new_macro_tick = st.text_input("🔤 ティッカー (例: ^SOX)", placeholder="^SOX", key="mac_tick")
-            if st.button("➕ 追加する", key="add_macro_btn"):
-                if new_macro_name and new_macro_tick:
-                    st.session_state.macro_dict[new_macro_name] = new_macro_tick
-                    if new_macro_name not in st.session_state.macro_display_list:
-                        st.session_state.macro_display_list.append(new_macro_name)
-                    st.rerun()
-            
-            st.divider()
-            
-            st.markdown("**2️⃣ 表示する項目の選択**")
-            selected_macros = st.multiselect(
-                "表示する指標を選んでください",
-                options=list(st.session_state.macro_dict.keys()),
-                default=st.session_state.macro_display_list,
-                key="macro_select"
-            )
-            
-            if set(selected_macros) != set(st.session_state.macro_display_list):
-                new_list = [m for m in st.session_state.macro_display_list if m in selected_macros]
-                for m in selected_macros:
-                    if m not in new_list:
-                        new_list.append(m)
-                st.session_state.macro_display_list = new_list
-                st.rerun()
 
-            st.divider()
+    # --- 💼 ポートフォリオ編集 セクション ---
+    with st.expander("💼 ポートフォリオの編集（保有銘柄の登録・削除）"):
+        st.markdown("**1️⃣ 保有銘柄の登録・更新** (米国株・ETF専用)")
+        c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+        with c1:
+            p_tick = st.text_input("ティッカー (例: SOXL)", key="p_tick")
+        with c2:
+            p_price = st.number_input("平均取得単価 ($)", min_value=0.0, step=0.1, format="%.2f", key="p_price")
+        with c3:
+            p_qty = st.number_input("保有数量 (株)", min_value=0.0, step=1.0, format="%.2f", key="p_qty")
+        with c4:
+            st.write("")
+            st.write("")
+            if st.button("登録", key="p_add"):
+                if p_tick and p_qty > 0:
+                    st.session_state.portfolio[p_tick.strip().upper()] = {'avg_price': p_price, 'qty': p_qty}
+                    st.rerun()
+        
+        st.divider()
+        st.markdown("**2️⃣ 現在の登録内容（削除）**")
+        if st.session_state.portfolio:
+            for t in list(st.session_state.portfolio.keys()):
+                col_a, col_b = st.columns([5, 1])
+                with col_a:
+                    st.write(f"**{t}** : {st.session_state.portfolio[t]['qty']:,.2f} 株 (平均 ${st.session_state.portfolio[t]['avg_price']:,.2f})")
+                with col_b:
+                    if st.button("削除", key=f"del_port_{t}"):
+                        del st.session_state.portfolio[t]
+                        st.rerun()
+        else:
+            st.info("現在登録されている保有銘柄はありません。")
+
+    st.write("")
+
+    with st.spinner("最新データを取得中..."):
+        # --- ⬛ 黒背景パネル0（ポートフォリオ） ---
+        port_html = "<div class='dashboard-panel'><div class='panel-header'>💼 ポートフォリオ状況</div>"
+        
+        if st.session_state.portfolio:
+            total_cost = 0
+            total_value = 0
+            details_html = ""
             
-            st.markdown("**3️⃣ 順番の入れ替え**")
-            st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
-            if st.session_state.macro_display_list:
-                sorted_macros = sort_items(st.session_state.macro_display_list, key="macro_sort")
-                if sorted_macros != st.session_state.macro_display_list:
-                    st.session_state.macro_display_list = sorted_macros
+            for sym, data in st.session_state.portfolio.items():
+                qty = data['qty']
+                avg_p = data['avg_price']
+                try:
+                    t = yf.Ticker(sym)
+                    h = t.history(period="1d")
+                    if not h.empty:
+                        c_price = h['Close'].iloc[-1]
+                        
+                        cost = avg_p * qty
+                        val = c_price * qty
+                        pnl = val - cost
+                        pnl_pct = (pnl / cost) * 100 if cost > 0 else 0
+                        
+                        total_cost += cost
+                        total_value += val
+                        
+                        pnl_class = 'val-up' if pnl > 0 else 'val-down' if pnl < 0 else 'val-neutral'
+                        sign = '+' if pnl > 0 else ''
+                        
+                        details_html += f"<div class='item-row sym-title'>🔹 {sym} <span style='font-size: 13px; color:#888; font-weight:normal;'>({qty:,.2f}株)</span></div>"
+                        details_html += f"<div class='item-sub-row'>"
+                        details_html += f"┣ <strong>評価額:</strong> ${val:,.2f} (現在値: ${c_price:,.2f})<br>"
+                        details_html += f"┗ <strong>含み損益:</strong> <span class='{pnl_class}'>{sign}${pnl:,.2f} ({sign}{pnl_pct:.2f}%)</span> ｜ 取得単価: ${avg_p:,.2f}"
+                        details_html += f"</div>"
+                    else:
+                        details_html += f"<div class='item-row'>🔹 <strong>{sym}</strong>: データ取得エラー</div>"
+                except:
+                    details_html += f"<div class='item-row'>🔹 <strong>{sym}</strong>: エラー (ティッカーを確認)</div>"
+            
+            tot_pnl = total_value - total_cost
+            tot_pct = (tot_pnl / total_cost) * 100 if total_cost > 0 else 0
+            tot_class = 'val-up' if tot_pnl > 0 else 'val-down' if tot_pnl < 0 else 'val-neutral'
+            tot_sign = '+' if tot_pnl > 0 else ''
+            
+            port_html += f"<div style='font-size: 24px; color: #FFFFFF; font-weight: bold; margin-bottom: 5px;'>総評価額: ${total_value:,.2f}</div>"
+            port_html += f"<div style='font-size: 18px; margin-bottom: 15px;'>トータル含み損益: <span class='{tot_class}'>{tot_sign}${tot_pnl:,.2f} ({tot_sign}{tot_pct:.2f}%)</span></div>"
+            port_html += f"<hr style='border-color: #2D303E; margin: 10px 0;'>"
+            port_html += details_html
+        else:
+            port_html += "<div class='item-row val-neutral'>保有銘柄が登録されていません。「💼 ポートフォリオの編集」から追加してください。<br><span style='font-size:12px;'>※現在は米国株・ETF（ドル建て計算）に最適化されています。</span></div>"
+        
+        port_html += "</div>"
+        st.markdown(port_html, unsafe_allow_html=True)
+
+
+        # --- 🌍 主要市場サマリー セクション ---
+        col1, col2 = st.columns([5, 1])
+        with col1:
+            st.subheader("🌍 主要市場サマリー")
+        with col2:
+            with st.popover("⚙️ 編集"):
+                st.markdown("**1️⃣ 新しい指標の追加**")
+                new_macro_name = st.text_input("📝 表示名", placeholder="半導体指数", key="mac_name")
+                new_macro_tick = st.text_input("🔤 ティッカー", placeholder="^SOX", key="mac_tick")
+                if st.button("➕ 追加する", key="add_macro_btn"):
+                    if new_macro_name and new_macro_tick:
+                        st.session_state.macro_dict[new_macro_name] = new_macro_tick
+                        if new_macro_name not in st.session_state.macro_display_list:
+                            st.session_state.macro_display_list.append(new_macro_name)
+                        st.rerun()
+                
+                st.divider()
+                
+                st.markdown("**2️⃣ 表示と順番の変更**")
+                st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
+                selected_macros = st.multiselect(
+                    "表示する指標",
+                    options=list(st.session_state.macro_dict.keys()),
+                    default=st.session_state.macro_display_list,
+                    key="macro_select"
+                )
+                if set(selected_macros) != set(st.session_state.macro_display_list):
+                    new_list = [m for m in st.session_state.macro_display_list if m in selected_macros]
+                    for m in selected_macros:
+                        if m not in new_list:
+                            new_list.append(m)
+                    st.session_state.macro_display_list = new_list
                     st.rerun()
 
-    with st.spinner("市場データを取得中..."):
+                if st.session_state.macro_display_list:
+                    sorted_macros = sort_items(st.session_state.macro_display_list, key="macro_sort")
+                    if sorted_macros != st.session_state.macro_display_list:
+                        st.session_state.macro_display_list = sorted_macros
+                        st.rerun()
+
+        # 黒背景パネル1（マクロ）
         html_macro = "<div class='dashboard-panel'>"
         for name in st.session_state.macro_display_list:
             symbol = st.session_state.macro_dict.get(name, "")
@@ -186,49 +276,45 @@ with tab_top:
         st.markdown(html_macro, unsafe_allow_html=True)
 
 
-    # --- 📌 監視銘柄 データ一覧 セクション ---
-    col3, col4 = st.columns([5, 1])
-    with col3:
-        st.subheader("📌 監視銘柄 データ一覧")
-    with col4:
-        with st.popover("⚙️ 編集"):
-            st.markdown("**1️⃣ 新しい銘柄の追加**")
-            new_watch_tick = st.text_input("🔤 ティッカー (例: AAPL)", placeholder="NVDA", key="watch_tick")
-            if st.button("➕ 追加する", key="add_watch_btn"):
-                c_tick = new_watch_tick.strip().upper()
-                if c_tick and c_tick not in st.session_state.watch_list:
-                    st.session_state.watch_list.append(c_tick)
-                    st.rerun()
-            
-            st.divider()
-            
-            st.markdown("**2️⃣ 表示する銘柄の選択**")
-            selected_watch = st.multiselect(
-                "表示する銘柄を選んでください",
-                options=st.session_state.watch_list,
-                default=st.session_state.watch_list,
-                key="watch_select"
-            )
-            
-            if set(selected_watch) != set(st.session_state.watch_list):
-                new_w_list = [m for m in st.session_state.watch_list if m in selected_watch]
-                for m in selected_watch:
-                    if m not in new_w_list:
-                        new_w_list.append(m)
-                st.session_state.watch_list = new_w_list
-                st.rerun()
-
-            st.divider()
-            
-            st.markdown("**3️⃣ 順番の入れ替え**")
-            st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
-            if st.session_state.watch_list:
-                sorted_watch = sort_items(st.session_state.watch_list, key="watch_sort_dd")
-                if sorted_watch != st.session_state.watch_list:
-                    st.session_state.watch_list = sorted_watch
+        # --- 📌 監視銘柄 データ一覧 セクション ---
+        col3, col4 = st.columns([5, 1])
+        with col3:
+            st.subheader("📌 監視銘柄 データ一覧")
+        with col4:
+            with st.popover("⚙️ 編集"):
+                st.markdown("**1️⃣ 新しい銘柄の追加**")
+                new_watch_tick = st.text_input("🔤 ティッカー", placeholder="NVDA", key="watch_tick")
+                if st.button("➕ 追加する", key="add_watch_btn"):
+                    c_tick = new_watch_tick.strip().upper()
+                    if c_tick and c_tick not in st.session_state.watch_list:
+                        st.session_state.watch_list.append(c_tick)
+                        st.rerun()
+                
+                st.divider()
+                
+                st.markdown("**2️⃣ 表示と順番の変更**")
+                st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
+                selected_watch = st.multiselect(
+                    "表示する銘柄",
+                    options=st.session_state.watch_list,
+                    default=st.session_state.watch_list,
+                    key="watch_select"
+                )
+                if set(selected_watch) != set(st.session_state.watch_list):
+                    new_w_list = [m for m in st.session_state.watch_list if m in selected_watch]
+                    for m in selected_watch:
+                        if m not in new_w_list:
+                            new_w_list.append(m)
+                    st.session_state.watch_list = new_w_list
                     st.rerun()
 
-    with st.spinner("銘柄データを取得中..."):
+                if st.session_state.watch_list:
+                    sorted_watch = sort_items(st.session_state.watch_list, key="watch_sort_dd")
+                    if sorted_watch != st.session_state.watch_list:
+                        st.session_state.watch_list = sorted_watch
+                        st.rerun()
+
+        # 黒背景パネル2（銘柄）
         html_watch = "<div class='dashboard-panel'>"
         if st.session_state.watch_list:
             for sym in st.session_state.watch_list:
@@ -238,13 +324,10 @@ with tab_top:
                     
                     if not hist.empty and len(hist) > 22:
                         curr_p = hist['Close'].iloc[-1]
-                        
-                        # 🚀 各期間の価格を取得（前日、前週、前月）
                         prev_p = hist['Close'].iloc[-2]
                         week_p = hist['Close'].iloc[-6] if len(hist) >= 6 else prev_p
                         month_p = hist['Close'].iloc[-22]
                         
-                        # 各種計算
                         day_diff = curr_p - prev_p
                         day_pct = (day_diff / prev_p) * 100
                         week_pct = ((curr_p - week_p) / week_p) * 100
@@ -259,7 +342,6 @@ with tab_top:
                         rs = gain / loss
                         rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                         
-                        # 色分けの判定
                         if day_diff > 0:
                             d_trend = f"<span class='val-up'>↑+{day_diff:.2f} (+{day_pct:.2f}%)</span>"
                         elif day_diff < 0:
@@ -277,7 +359,6 @@ with tab_top:
                         week_color = 'val-up' if week_pct > 0 else 'val-down' if week_pct < 0 else 'val-neutral'
                         month_color = 'val-up' if month_pct > 0 else 'val-down' if month_pct < 0 else 'val-neutral'
                         
-                        # 🚀 ここがスマホ最適化された3行レイアウト！
                         html_watch += f"<div class='item-row sym-title'>🔹 {sym}</div>"
                         html_watch += f"<div class='item-sub-row'>"
                         html_watch += f"┣ <strong>現在値:</strong> ${curr_p:.2f} (前日比: {d_trend})<br>"
