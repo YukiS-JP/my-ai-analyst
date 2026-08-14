@@ -17,24 +17,25 @@ st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wid
 
 st.title("📊 My AI Analyst Dashboard")
 
-# --- セッションステート（初期設定） ---
+# --- セッションステート（初期設定とカスタムデータの保存） ---
 if 'watch_list' not in st.session_state:
     st.session_state.watch_list = ["SOXL", "RDW", "DNA", "FNGU"]
-if 'macro_list' not in st.session_state:
-    st.session_state.macro_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
 
-# 追加できるマクロ指標のリスト
-AVAILABLE_MACROS = {
-    "米ドル/円": "JPY=X",
-    "S&P 500": "^GSPC",
-    "NASDAQ": "^IXIC",
-    "日経平均": "^N225",
-    "NYダウ": "^DJI",
-    "米国10年債利回り": "^TNX",
-    "ゴールド(金)": "GC=F",
-    "原油(WTI)": "CL=F",
-    "VIX恐怖指数": "^VIX"
-}
+# ユーザーが自由に追加できるマクロ指標の辞書（名前: ティッカー）
+if 'macro_dict' not in st.session_state:
+    st.session_state.macro_dict = {
+        "米ドル/円": "JPY=X",
+        "S&P 500": "^GSPC",
+        "NASDAQ": "^IXIC",
+        "日経平均": "^N225",
+        "米国10年債利回り": "^TNX",
+        "原油(WTI)": "CL=F",
+        "ゴールド(金)": "GC=F",
+        "ビットコイン": "BTC-USD"
+    }
+# 実際に表示するマクロ指標のリスト（並び順）
+if 'macro_display_list' not in st.session_state:
+    st.session_state.macro_display_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
 
 # ------------------------------------------------
 # AIによる「ステータス判定・選定理由」を生成する関数
@@ -87,43 +88,18 @@ tab_top, tab1, tab2, tab3 = st.tabs(["🏠 トップ", "🔍 スクリーニン�
 # 🌟 トップ（電光掲示板風サマリー ＆ 折りたたみチャート）
 # ==========================================
 with tab_top:
-    
-    # ⚙️ 表示設定アコーディオン（並び替え・追加編集用）
-    with st.expander("⚙️ 司令塔の表示設定（指標・銘柄の追加と並び替え）", expanded=False):
-        st.markdown("ここで選んだ項目が、そのままの順番で下の黒いパネルに表示されます。選択肢の「×」を押して消したり、リストから新しく追加したりできます。")
-        
-        selected_macros = st.multiselect(
-            "🌍 表示する市場指標を選択",
-            options=list(AVAILABLE_MACROS.keys()),
-            default=st.session_state.macro_list
-        )
-        if selected_macros != st.session_state.macro_list:
-            st.session_state.macro_list = selected_macros
-            st.rerun()
-            
-        selected_charts = st.multiselect(
-            "📌 表示する監視銘柄を選択",
-            options=st.session_state.watch_list,
-            default=st.session_state.watch_list
-        )
-        
-    st.write("") # 少し余白
-    
-    # ⬛ ここから黒背景デザインのHTML生成処理
-    with st.spinner("最新の市場データを取得中..."):
-        
-        html_style = """
+    # 共通の黒背景CSSデザイン
+    st.markdown("""
         <style>
             .dashboard-panel {
                 background-color: #12141A;
-                padding: 20px;
+                padding: 15px 20px;
                 border-radius: 12px;
                 box-shadow: 0 4px 10px rgba(0,0,0,0.4);
                 border: 1px solid #2D303E;
                 font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                margin-bottom: 25px;
             }
-            .panel-header { color: #82B1FF; margin-top: 0; margin-bottom: 12px; font-size: 18px; border-bottom: 1px solid #2D303E; padding-bottom: 8px;}
-            .panel-sub-header { color: #B39DDB; margin-top: 20px; margin-bottom: 12px; font-size: 18px; border-bottom: 1px solid #2D303E; padding-bottom: 8px;}
             .item-row { margin: 8px 0; color: #EEEEEE; font-size: 15px;}
             .item-sub-row { margin: 2px 0 12px 18px; color: #BBBBBB; font-size: 14px; line-height: 1.5;}
             .val-up { color: #00E676; font-weight: bold;}
@@ -131,13 +107,44 @@ with tab_top:
             .val-neutral { color: #9E9E9E;}
             .sym-title { font-weight: bold; font-size: 16px; color: #FFFFFF;}
         </style>
-        <div class="dashboard-panel">
-            <div class="panel-header">🌍 主要市場サマリー</div>
-        """
-        
-        # マクロ指標のデータ取得とHTML追加
-        for name in st.session_state.macro_list:
-            symbol = AVAILABLE_MACROS[name]
+    """, unsafe_allow_html=True)
+    
+    # --- 🌍 主要市場サマリー セクション ---
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        st.subheader("🌍 主要市場サマリー")
+    with col2:
+        # タイトル横のスマートな設定ボタン
+        with st.popover("⚙️ 編集"):
+            st.markdown("**追加と並び替え**")
+            
+            # 任意のティッカー追加フォーム
+            new_macro_name = st.text_input("📝 表示名 (例: SOX指数)", placeholder="半導体指数")
+            new_macro_tick = st.text_input("🔤 ティッカー (例: ^SOX)", placeholder="^SOX")
+            if st.button("➕ この指標を追加", key="add_macro_btn"):
+                if new_macro_name and new_macro_tick:
+                    st.session_state.macro_dict[new_macro_name] = new_macro_tick
+                    if new_macro_name not in st.session_state.macro_display_list:
+                        st.session_state.macro_display_list.append(new_macro_name)
+                    st.rerun()
+            
+            st.divider()
+            # 並び替えと表示のオンオフ
+            selected_macros = st.multiselect(
+                "👁️ 表示する指標と順番",
+                options=list(st.session_state.macro_dict.keys()),
+                default=st.session_state.macro_display_list,
+                key="macro_sort"
+            )
+            if selected_macros != st.session_state.macro_display_list:
+                st.session_state.macro_display_list = selected_macros
+                st.rerun()
+
+    # 黒背景パネル1（マクロ）の描画
+    with st.spinner("市場データを取得中..."):
+        html_macro = "<div class='dashboard-panel'>"
+        for name in st.session_state.macro_display_list:
+            symbol = st.session_state.macro_dict.get(name, "")
             try:
                 t = yf.Ticker(symbol)
                 h = t.history(period="5d")
@@ -154,22 +161,51 @@ with tab_top:
                     else:
                         trend_html = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
                         
-                    if symbol == "JPY=X":
+                    if "JPY" in symbol or "円" in name:
                         val_str = f"¥{c_price:.2f}"
                     else:
                         val_str = f"{c_price:,.2f}"
                         
-                    html_style += f"<div class='item-row'><strong>{name}</strong>: {val_str} ({trend_html})</div>"
+                    html_macro += f"<div class='item-row'><strong>{name}</strong>: {val_str} ({trend_html})</div>"
                 else:
-                    html_style += f"<div class='item-row'><strong>{name}</strong>: 取得失敗</div>"
+                    html_macro += f"<div class='item-row'><strong>{name}</strong>: 取得失敗 (ティッカーを確認)</div>"
             except:
-                html_style += f"<div class='item-row'><strong>{name}</strong>: エラー</div>"
-                
-        html_style += "<div class='panel-sub-header'>📌 監視銘柄 データ一覧</div>"
-        
-        # 監視銘柄のデータ取得とHTML追加
-        if selected_charts:
-            for sym in selected_charts:
+                html_macro += f"<div class='item-row'><strong>{name}</strong>: エラー</div>"
+        html_macro += "</div>"
+        st.markdown(html_macro, unsafe_allow_html=True)
+
+
+    # --- 📌 監視銘柄 データ一覧 セクション ---
+    col3, col4 = st.columns([5, 1])
+    with col3:
+        st.subheader("📌 監視銘柄 データ一覧")
+    with col4:
+        with st.popover("⚙️ 編集"):
+            st.markdown("**追加と並び替え**")
+            
+            new_watch_tick = st.text_input("🔤 ティッカー (例: AAPL)", placeholder="NVDA")
+            if st.button("➕ この銘柄を追加", key="add_watch_btn"):
+                c_tick = new_watch_tick.strip().upper()
+                if c_tick and c_tick not in st.session_state.watch_list:
+                    st.session_state.watch_list.append(c_tick)
+                    st.rerun()
+            
+            st.divider()
+            selected_watch = st.multiselect(
+                "👁️ 表示する銘柄と順番",
+                options=st.session_state.watch_list,
+                default=st.session_state.watch_list,
+                key="watch_sort"
+            )
+            if selected_watch != st.session_state.watch_list:
+                st.session_state.watch_list = selected_watch
+                st.rerun()
+
+    # 黒背景パネル2（銘柄）の描画
+    with st.spinner("銘柄データを取得中..."):
+        html_watch = "<div class='dashboard-panel'>"
+        if st.session_state.watch_list:
+            for sym in st.session_state.watch_list:
                 try:
                     ticker = yf.Ticker(sym)
                     hist = ticker.history(period="1y")
@@ -208,26 +244,23 @@ with tab_top:
                             
                         month_color = 'val-up' if month_pct > 0 else 'val-down' if month_pct < 0 else 'val-neutral'
                         
-                        html_style += f"<div class='item-row sym-title'>🔹 {sym}</div>"
-                        html_style += f"<div class='item-sub-row'>"
-                        html_style += f"┣ <strong>現在値:</strong> ${curr_p:.2f} ({d_trend})<br>"
-                        html_style += f"┗ <strong>前月比:</strong> <span class='{month_color}'>{month_pct:+.2f}%</span> ｜ <strong>RSI:</strong> {rsi_val:.1f} ({rsi_stat}) ｜ <strong>高値差:</strong> {dd_52:+.1f}%"
-                        html_style += f"</div>"
+                        html_watch += f"<div class='item-row sym-title'>🔹 {sym}</div>"
+                        html_watch += f"<div class='item-sub-row'>"
+                        html_watch += f"┣ <strong>現在値:</strong> ${curr_p:.2f} ({d_trend})<br>"
+                        html_watch += f"┗ <strong>前月比:</strong> <span class='{month_color}'>{month_pct:+.2f}%</span> ｜ <strong>RSI:</strong> {rsi_val:.1f} ({rsi_stat}) ｜ <strong>高値差:</strong> {dd_52:+.1f}%"
+                        html_watch += f"</div>"
                 except:
-                    html_style += f"<div class='item-row sym-title'>🔹 {sym}</div><div class='item-sub-row'>データ取得エラー</div>"
+                    html_watch += f"<div class='item-row sym-title'>🔹 {sym}</div><div class='item-sub-row'>データ取得エラー (ティッカーを確認)</div>"
         else:
-            html_style += "<div class='item-row val-neutral'>表示する銘柄が選択されていません。上の設定メニューから選んでください。</div>"
-
-        html_style += "</div>" # パネル終了
-        
-        # 描画
-        st.markdown(html_style, unsafe_allow_html=True)
+            html_watch += "<div class='item-row val-neutral'>表示する銘柄がありません。⚙️編集から追加してください。</div>"
+        html_watch += "</div>"
+        st.markdown(html_watch, unsafe_allow_html=True)
     
     st.write("")
     
     # 📈 詳細チャートセクション（一覧の下に配置）
-    if selected_charts:
-        for sym in selected_charts:
+    if st.session_state.watch_list:
+        for sym in st.session_state.watch_list:
             with st.expander(f"📈 {sym} の詳細チャートを開く / 閉じる"):
                 html_code = f"""
                 <div class="tradingview-widget-container">
