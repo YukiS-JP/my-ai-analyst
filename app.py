@@ -113,11 +113,9 @@ if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = {}
 if 'company_names' not in st.session_state: st.session_state.company_names = {} 
 if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] 
 
-# 🌟 トラッカーデータを日米で完全に分離！
 if 'last_tracker_data_us' not in st.session_state: st.session_state.last_tracker_data_us = []
 if 'last_tracker_data_jp' not in st.session_state: st.session_state.last_tracker_data_jp = []
 
-# バージョン管理
 if 'wl_ver' not in st.session_state: st.session_state.wl_ver = 0
 if 'mac_ver' not in st.session_state: st.session_state.mac_ver = 0
 
@@ -362,7 +360,7 @@ with tab_top:
                         
                         if day_diff > 0: d_trend = f"<span class='val-up'>↑+{day_diff:,.2f} (+{day_pct:.2f}%)</span>"
                         elif day_diff < 0: d_trend = f"<span class='val-down'>↓{day_diff:,.2f} ({day_pct:.2f}%)</span>"
-                        else: d_trend = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
+                        else: d_trend = fspan class='val-neutral'>±0.00 (0.00%)</span>"
                         if rsi_val >= 70: rsi_stat = "<span class='val-down'>🔴 過熱</span>"
                         elif rsi_val <= 45: rsi_stat = "<span class='val-up'>🟢 割安</span>"
                         else: rsi_stat = "<span class='val-neutral'>⚪️ 中立</span>"
@@ -535,7 +533,7 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー（日米完全分離対応）
+# 🎯 タブ2：個別銘柄トラッカー
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
@@ -572,8 +570,10 @@ with tab2:
         watch_list = update_watchlist(new_w_list) 
         st.rerun()
 
+    # 🌟 バグ修正: expander をやめて popover (クリックで開くメニュー) に変更しました！
     if len(watch_list) > 1:
-        with st.expander("↕️ リストの並び替え（ドラッグ＆ドロップ）"):
+        with st.popover("↕️ リストの並び替え（ドラッグ＆ドロップ）"):
+            st.markdown("**ドラッグ＆ドロップで順番を変更できます**")
             sorted_watch = sort_items(watch_list, key=f"t2_sort_{is_us}_{st.session_state.wl_ver}")
             if sorted_watch != watch_list:
                 watch_list = update_watchlist(sorted_watch)
@@ -586,7 +586,7 @@ with tab2:
 
     if st.button("🔄 最新の株価・AI判定に更新（手動リロード）", key=f"t2_fetch_btn_{is_us}") or auto_fetch:
         with st.spinner('データを取得・計算中...'):
-            st.session_state[tracker_data_key] = [] # 🌟 当該市場のメモリだけをリセット
+            st.session_state[tracker_data_key] = [] 
             for sym in watch_list:
                 disp_name = get_company_name(sym) 
                 hist = pd.DataFrame()
@@ -623,7 +623,6 @@ with tab2:
             
             st.session_state[f"last_fetched_wl_{is_us}"] = list(watch_list)
 
-    # 🌟 当該市場のデータだけを表示
     current_tracker_data = st.session_state[tracker_data_key]
     if current_tracker_data:
         for data in current_tracker_data:
