@@ -127,17 +127,23 @@ if 'macro_dict' not in st.session_state:
     }
 if 'macro_display_list' not in st.session_state: st.session_state.macro_display_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
 
-# 🌟 巻き戻りバグを完全に防ぐための「強制状態同期ヘルパー」
+# 🌟 巻き戻りバグを安全に防ぐための「強制状態同期ヘルパー」（エラー修正版）
 def update_watchlist(new_list):
     st.session_state[watch_list_key] = new_list
-    st.session_state[f"watch_select_{is_us}"] = new_list
-    st.session_state[f"t2_select_{is_us}"] = new_list
+    
+    # ❌ 直接書き換えるのではなく、古い記憶（キャッシュ）を消去してリセットする
+    if f"watch_select_{is_us}" in st.session_state:
+        del st.session_state[f"watch_select_{is_us}"]
+    if f"t2_select_{is_us}" in st.session_state:
+        del st.session_state[f"t2_select_{is_us}"]
+        
     save_watchlist_to_cloud(market_type_str, new_list)
     return new_list
 
 def update_macro_list(new_list):
     st.session_state.macro_display_list = new_list
-    st.session_state[f"macro_select_{is_us}"] = new_list
+    if f"macro_select_{is_us}" in st.session_state:
+        del st.session_state[f"macro_select_{is_us}"]
     return new_list
 
 if 'screener_indicators' not in st.session_state: st.session_state.screener_indicators = ["RSI (14日)", "MACD", "PER (株価収益率)", "PBR (株価純資産倍率)"]
@@ -269,7 +275,7 @@ with tab_top:
                         st.session_state.macro_dict[new_macro_name] = new_macro_tick
                         if new_macro_name not in st.session_state.macro_display_list:
                             st.session_state.macro_display_list.append(new_macro_name)
-                            update_macro_list(st.session_state.macro_display_list) # 強制同期
+                            update_macro_list(st.session_state.macro_display_list)
                         st.rerun()
                 st.divider()
                 selected_macros = st.multiselect("表示", options=list(st.session_state.macro_dict.keys()), default=st.session_state.macro_display_list, key=f"macro_select_{is_us}")
@@ -277,12 +283,12 @@ with tab_top:
                     new_list = [m for m in st.session_state.macro_display_list if m in selected_macros]
                     for m in selected_macros:
                         if m not in new_list: new_list.append(m)
-                    update_macro_list(new_list) # 強制同期
+                    update_macro_list(new_list)
                     st.rerun()
                 if st.session_state.macro_display_list:
                     sorted_macros = sort_items(st.session_state.macro_display_list, key=f"macro_sort_{is_us}")
                     if sorted_macros != st.session_state.macro_display_list:
-                        update_macro_list(sorted_macros) # 強制同期
+                        update_macro_list(sorted_macros)
                         st.rerun()
 
         html_macro = "<div class='dashboard-panel'>"
@@ -312,7 +318,7 @@ with tab_top:
                     if not is_us and c_tick.isdigit(): c_tick += ".T"
                     if c_tick and c_tick not in watch_list:
                         watch_list.append(c_tick)
-                        watch_list = update_watchlist(watch_list) # 🌟 確実な状態同期
+                        watch_list = update_watchlist(watch_list)
                         st.rerun()
                 st.divider()
                 selected_watch = st.multiselect("表示", options=watch_list, default=watch_list, key=f"watch_select_{is_us}")
@@ -320,12 +326,13 @@ with tab_top:
                     new_w_list = [m for m in watch_list if m in selected_watch]
                     for m in selected_watch:
                         if m not in new_w_list: new_w_list.append(m)
-                    watch_list = update_watchlist(new_w_list) # 🌟 確実な状態同期
+                    st.session_state[watch_list_key] = new_w_list
+                    save_watchlist_to_cloud(market_type_str, new_w_list)
                     st.rerun()
                 if watch_list:
                     sorted_watch = sort_items(watch_list, key=f"watch_sort_dd_{is_us}")
                     if sorted_watch != watch_list:
-                        watch_list = update_watchlist(sorted_watch) # 🌟 確実な状態同期
+                        watch_list = update_watchlist(sorted_watch)
                         st.rerun()
 
         html_watch = "<div class='dashboard-panel'>"
@@ -521,7 +528,7 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー（巻き戻り完全防止対応）
+# 🎯 タブ2：個別銘柄トラッカー
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
@@ -544,7 +551,7 @@ with tab2:
                 st.warning(f"⚠️ 「{clean_ticker}」はすでに監視リストに登録されています。")
             else:
                 watch_list.append(clean_ticker)
-                watch_list = update_watchlist(watch_list) # 🌟 ここで記憶を強制上書き
+                watch_list = update_watchlist(watch_list) # 🌟 安全な状態同期
                 st.success(f"✅ 「{clean_ticker}」をリアルタイム追加しました！")
                 time.sleep(0.5)
                 st.rerun()
@@ -552,11 +559,10 @@ with tab2:
     # 🌟 削除や選択変更をしたときも安全に状態を同期する
     selected = st.multiselect("📝 現在の監視リスト（削除や選択変更）", options=watch_list, default=watch_list, key=f"t2_select_{is_us}")
     if set(selected) != set(watch_list):
-        # 順番を保持しつつ、削除されたものを反映
         new_w_list = [m for m in watch_list if m in selected]
         for m in selected:
             if m not in new_w_list: new_w_list.append(m)
-        watch_list = update_watchlist(new_w_list) # 🌟 強制同期
+        watch_list = update_watchlist(new_w_list) # 🌟 安全な状態同期
         st.rerun()
 
     if st.button("🎯 最新データを取得してAI判定を実行", key=f"t2_fetch_btn_{is_us}"):
