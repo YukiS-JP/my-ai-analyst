@@ -12,7 +12,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import email.utils
 import streamlit.components.v1 as components
-from streamlit_sortables import sort_items  # 🌟 D&D用の拡張ツールを追加
+from streamlit_sortables import sort_items
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -100,11 +100,11 @@ with tab_top:
                 margin-bottom: 25px;
             }
             .item-row { margin: 8px 0; color: #EEEEEE; font-size: 15px;}
-            .item-sub-row { margin: 2px 0 12px 18px; color: #BBBBBB; font-size: 14px; line-height: 1.5;}
+            .item-sub-row { margin: 2px 0 12px 18px; color: #BBBBBB; font-size: 14px; line-height: 1.6;}
             .val-up { color: #00E676; font-weight: bold;}
             .val-down { color: #FF5252; font-weight: bold;}
             .val-neutral { color: #9E9E9E;}
-            .sym-title { font-weight: bold; font-size: 16px; color: #FFFFFF;}
+            .sym-title { font-weight: bold; font-size: 16px; color: #FFFFFF; margin-top: 15px;}
         </style>
     """, unsafe_allow_html=True)
     
@@ -127,7 +127,6 @@ with tab_top:
             st.divider()
             
             st.markdown("**2️⃣ 表示する項目の選択**")
-            # 表示する項目だけを選択（削除もここで行う）
             selected_macros = st.multiselect(
                 "表示する指標を選んでください",
                 options=list(st.session_state.macro_dict.keys()),
@@ -135,7 +134,6 @@ with tab_top:
                 key="macro_select"
             )
             
-            # リストに変更があった場合の処理
             if set(selected_macros) != set(st.session_state.macro_display_list):
                 new_list = [m for m in st.session_state.macro_display_list if m in selected_macros]
                 for m in selected_macros:
@@ -148,14 +146,12 @@ with tab_top:
             
             st.markdown("**3️⃣ 順番の入れ替え**")
             st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
-            # 🌟 ここがドラッグ＆ドロップ機能
             if st.session_state.macro_display_list:
                 sorted_macros = sort_items(st.session_state.macro_display_list, key="macro_sort")
                 if sorted_macros != st.session_state.macro_display_list:
                     st.session_state.macro_display_list = sorted_macros
                     st.rerun()
 
-    # 黒背景パネル1（マクロ）の描画
     with st.spinner("市場データを取得中..."):
         html_macro = "<div class='dashboard-panel'>"
         for name in st.session_state.macro_display_list:
@@ -226,14 +222,12 @@ with tab_top:
             
             st.markdown("**3️⃣ 順番の入れ替え**")
             st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
-            # 🌟 ここがドラッグ＆ドロップ機能
             if st.session_state.watch_list:
                 sorted_watch = sort_items(st.session_state.watch_list, key="watch_sort_dd")
                 if sorted_watch != st.session_state.watch_list:
                     st.session_state.watch_list = sorted_watch
                     st.rerun()
 
-    # 黒背景パネル2（銘柄）の描画
     with st.spinner("銘柄データを取得中..."):
         html_watch = "<div class='dashboard-panel'>"
         if st.session_state.watch_list:
@@ -244,11 +238,16 @@ with tab_top:
                     
                     if not hist.empty and len(hist) > 22:
                         curr_p = hist['Close'].iloc[-1]
+                        
+                        # 🚀 各期間の価格を取得（前日、前週、前月）
                         prev_p = hist['Close'].iloc[-2]
+                        week_p = hist['Close'].iloc[-6] if len(hist) >= 6 else prev_p
+                        month_p = hist['Close'].iloc[-22]
+                        
+                        # 各種計算
                         day_diff = curr_p - prev_p
                         day_pct = (day_diff / prev_p) * 100
-
-                        month_p = hist['Close'].iloc[-22]
+                        week_pct = ((curr_p - week_p) / week_p) * 100
                         month_pct = ((curr_p - month_p) / month_p) * 100
 
                         high_52 = hist['High'].max()
@@ -260,6 +259,7 @@ with tab_top:
                         rs = gain / loss
                         rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                         
+                        # 色分けの判定
                         if day_diff > 0:
                             d_trend = f"<span class='val-up'>↑+{day_diff:.2f} (+{day_pct:.2f}%)</span>"
                         elif day_diff < 0:
@@ -274,12 +274,15 @@ with tab_top:
                         else:
                             rsi_stat = "<span class='val-neutral'>⚪️ 中立</span>"
                             
+                        week_color = 'val-up' if week_pct > 0 else 'val-down' if week_pct < 0 else 'val-neutral'
                         month_color = 'val-up' if month_pct > 0 else 'val-down' if month_pct < 0 else 'val-neutral'
                         
+                        # 🚀 ここがスマホ最適化された3行レイアウト！
                         html_watch += f"<div class='item-row sym-title'>🔹 {sym}</div>"
                         html_watch += f"<div class='item-sub-row'>"
-                        html_watch += f"┣ <strong>現在値:</strong> ${curr_p:.2f} ({d_trend})<br>"
-                        html_watch += f"┗ <strong>前月比:</strong> <span class='{month_color}'>{month_pct:+.2f}%</span> ｜ <strong>RSI:</strong> {rsi_val:.1f} ({rsi_stat}) ｜ <strong>高値差:</strong> {dd_52:+.1f}%"
+                        html_watch += f"┣ <strong>現在値:</strong> ${curr_p:.2f} (前日比: {d_trend})<br>"
+                        html_watch += f"┣ <strong>前週比:</strong> <span class='{week_color}'>{week_pct:+.2f}%</span> ｜ <strong>前月比:</strong> <span class='{month_color}'>{month_pct:+.2f}%</span><br>"
+                        html_watch += f"┗ <strong>RSI:</strong> {rsi_val:.1f} ({rsi_stat}) ｜ <strong>高値差:</strong> {dd_52:+.1f}%"
                         html_watch += f"</div>"
                 except:
                     html_watch += f"<div class='item-row sym-title'>🔹 {sym}</div><div class='item-sub-row'>データ取得エラー (ティッカーを確認)</div>"
