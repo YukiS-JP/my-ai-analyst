@@ -18,15 +18,20 @@ from deep_translator import GoogleTranslator
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
 # ==========================================
-# 🌟 ヘルパー関数：スプレッドシートを覗いて「保存済みか」を確認 (端末間同期)
+# 🌟 クラウド同期ヘルパー関数（スプレッドシート連携）
 # ==========================================
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0"
+
+def get_cloud_client():
+    creds_json = json.loads(st.secrets["google_sheets_creds"])
+    scopes = ['https://www.googleapis.com/auth/spreadsheets']
+    return gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
+
+# 1. すでに保存済みか確認 (端末間同期)
 def check_already_saved(market_mode, current_date, sheet_type="screener"):
     try:
-        creds_json = json.loads(st.secrets["google_sheets_creds"])
-        scopes = ['https://www.googleapis.com/auth/spreadsheets']
-        client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
-        sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0")
-        
+        client = get_cloud_client()
+        sheet = client.open_by_url(SHEET_URL)
         target_ws_name = "スクリーニング履歴" if sheet_type == "screener" else "シート1"
         try:
             ws = sheet.worksheet(target_ws_name)
@@ -45,6 +50,51 @@ def check_already_saved(market_mode, current_date, sheet_type="screener"):
     except:
         return False
 
+# 2. クラウドから監視リストをロード
+def load_watchlist_from_cloud(market_type):
+    default_us = ["SOXL", "RDW", "DNA", "FNGU"]
+    default_jp = ["7203.T", "1959.T", "8035.T", "9984.T"]
+    defaults = default_us if market_type == "US" else default_jp
+    try:
+        client = get_cloud_client()
+        sheet = client.open_by_url(SHEET_URL)
+        try:
+            ws = sheet.worksheet("設定_監視リスト")
+        except:
+            ws = sheet.add_worksheet(title="設定_監視リスト", rows="100", cols="5")
+            ws.append_row(["市場", "ティッカー"])
+            for d in default_us: ws.append_row(["US", d])
+            for d in default_jp: ws.append_row(["JP", d])
+            return defaults
+            
+        vals = ws.get_all_values()
+        list_items = [row[1] for row in vals[1:] if len(row) >= 2 and row[0] == market_type]
+        return list_items if list_items else defaults
+    except:
+        return defaults
+
+# 3. クラウドへ監視リストをセーブ
+def save_watchlist_to_cloud(market_type, watch_list):
+    try:
+        client = get_cloud_client()
+        sheet = client.open_by_url(SHEET_URL)
+        try:
+            ws = sheet.worksheet("設定_監視リスト")
+        except:
+            ws = sheet.add_worksheet(title="設定_監視リスト", rows="100", cols="5")
+            ws.append_row(["市場", "ティッカー"])
+            
+        vals = ws.get_all_values()
+        # 該当市場以外を残して再構築
+        new_rows = [row for row in vals if row[0] != market_type]
+        for sym in watch_list:
+            new_rows.append([market_type, sym])
+            
+        ws.clear()
+        ws.update(new_rows)
+    except Exception as e:
+        st.error(f"監視リストのクラウド同期エラー: {e}")
+
 # ==========================================
 # 🌟 基本設定・モード切替
 # ==========================================
@@ -52,14 +102,16 @@ st.title("📊 My AI Analyst Dashboard")
 
 market_mode = st.radio("🌍 分析する市場を切り替え", ["🇺🇸 米国市場 (US)", "🇯🇵 日本市場 (JP)"], horizontal=True)
 is_us = (market_mode == "🇺🇸 米国市場 (US)")
+market_type_str = "US" if is_us else "JP"
 
 curr_sym = "$" if is_us else "¥"
 market_name_tv = 'america' if is_us else 'japan'
 ticker_suffix_hint = "" if is_us else " (例: 7203 または 7203.T)"
 
-# --- セッションステート初期化 ---
-if 'watch_list_us' not in st.session_state: st.session_state.watch_list_us = ["SOXL", "RDW", "DNA", "FNGU"]
-if 'watch_list_jp' not in st.session_state: st.session_state.watch_list_jp = ["7203.T", "1959.T", "8035.T", "9984.T"]
+# --- セッションステート初期化（クラウドからロード） ---
+if 'watch_list_us' not in st.session_state: st.session_state.watch_list_us = load_watchlist_from_cloud("US")
+if 'watch_list_jp' not in st.session_state: st.session_state.watch_list_jp = load_watchlist_from_cloud("JP")
+
 if 'portfolio_us' not in st.session_state: st.session_state.portfolio_us = {}
 if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = {}
 if 'company_names' not in st.session_state: st.session_state.company_names = {} 
@@ -243,17 +295,25 @@ with tab_top:
                 if st.button("➕ 追加", key=f"add_watch_btn_{is_us}"):
                     c_tick = new_watch_tick_raw.strip().upper()
                     if not is_us and c_tick.isdigit(): c_tick += ".T"
-                    if c_tick and c_tick not in watch_list: st.session_state[watch_list_key].append(c_tick); st.rerun()
+                    if c_tick and c_tick not in watch_list:
+                        watch_list.append(c_tick)
+                        save_watchlist_to_cloud(market_type_str, watch_list)
+                        st.rerun()
                 st.divider()
                 selected_watch = st.multiselect("表示", options=watch_list, default=watch_list, key=f"watch_select_{is_us}")
                 if set(selected_watch) != set(watch_list):
                     new_w_list = [m for m in watch_list if m in selected_watch]
                     for m in selected_watch:
                         if m not in new_w_list: new_w_list.append(m)
-                    st.session_state[watch_list_key] = new_w_list; st.rerun()
+                    st.session_state[watch_list_key] = new_w_list
+                    save_watchlist_to_cloud(market_type_str, new_w_list)
+                    st.rerun()
                 if watch_list:
                     sorted_watch = sort_items(watch_list, key=f"watch_sort_dd_{is_us}")
-                    if sorted_watch != watch_list: st.session_state[watch_list_key] = sorted_watch; st.rerun()
+                    if sorted_watch != watch_list:
+                        st.session_state[watch_list_key] = sorted_watch
+                        save_watchlist_to_cloud(market_type_str, sorted_watch)
+                        st.rerun()
 
         html_watch = "<div class='dashboard-panel'>"
         if watch_list:
@@ -448,7 +508,7 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー（重複追加ガード付き）
+# 🎯 タブ2：個別銘柄トラッカー
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
@@ -460,17 +520,20 @@ with tab2:
             clean_ticker = new_ticker_raw.strip().upper()
             if not is_us and clean_ticker.isdigit(): clean_ticker += ".T"
             
-            # 🌟 すでにリストに存在するかチェック
             if clean_ticker in watch_list:
                 st.warning(f"⚠️ 「{clean_ticker}」はすでに監視リストに登録されています。")
             elif clean_ticker:
-                st.session_state[watch_list_key].append(clean_ticker)
+                watch_list.append(clean_ticker)
+                save_watchlist_to_cloud(market_type_str, watch_list)
                 st.success(f"✅ 「{clean_ticker}」を追加しました！")
                 time.sleep(0.8)
                 st.rerun() 
                 
     selected = st.multiselect("📝 現在の監視リスト", options=watch_list, default=watch_list, key=f"t2_select_{is_us}")
-    if selected != watch_list: st.session_state[watch_list_key] = selected; st.rerun()
+    if selected != watch_list:
+        st.session_state[watch_list_key] = selected
+        save_watchlist_to_cloud(market_type_str, selected)
+        st.rerun()
 
     if st.button("🎯 最新データを取得してAI判定を実行", key=f"t2_fetch_btn_{is_us}"):
         with st.spinner('データを取得・計算中...'):
