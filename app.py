@@ -8,6 +8,9 @@ import json
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
+import urllib.request
+import xml.etree.ElementTree as ET
+import email.utils
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -193,7 +196,7 @@ with tab2:
                             detail = f"MACDは上向きですが、RSIが{rsi_val:.1f}であり新規買いの基準（45未満）には達していません。"
                         else:
                             detail = f"RSIが{rsi_val:.1f}で中立圏。MACDも方向感がなく、次の波を待つ局面です。"
-                        signal = f"⚪️【静観】{detail}"
+                        signal = f"⚪️【静今】{detail}"
                         
                     data_list.append({
                         'ティッカー': sym,
@@ -242,7 +245,7 @@ with tab2:
                     st.divider()
 
 # ==========================================
-# タブ3：最新ニュース（追加機能）
+# タブ3：最新ニュース（Googleニュース対応版）
 # ==========================================
 with tab3:
     st.write("監視中の銘柄に関連する最新ニュース（ヘッドライン）をチェックできます。")
@@ -253,24 +256,36 @@ with tab3:
         if st.button(f"🔍 {news_target} の最新ニュースを取得"):
             with st.spinner(f'{news_target} のニュースを検索中...'):
                 try:
-                    ticker = yf.Ticker(news_target)
-                    news_list = ticker.news
+                    # Google NewsのRSS機能を使って「日本語」を優先的に取得
+                    url = f"https://news.google.com/rss/search?q={news_target}+stock&hl=ja&gl=JP&ceid=JP:ja"
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
                     
-                    if news_list:
+                    with urllib.request.urlopen(req) as response:
+                        xml_data = response.read()
+                    
+                    root = ET.fromstring(xml_data)
+                    items = root.findall('.//item')
+                    
+                    if items:
                         st.success(f"{news_target} の最新ニュースを取得しました。")
-                        for article in news_list[:5]:  # 最新5件を表示
-                            title = article.get('title', 'タイトルなし')
-                            link = article.get('link', '#')
-                            publisher = article.get('publisher', '配信元不明')
-                            pub_time = article.get('providerPublishTime')
+                        for item in items[:5]:  # 最新5件を表示
+                            title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
+                            link = item.find('link').text if item.find('link') is not None else '#'
                             
-                            # タイムスタンプを日本時間に変換
-                            if pub_time:
-                                dt = (datetime.utcfromtimestamp(pub_time) + timedelta(hours=9)).strftime('%Y/%m/%d %H:%M')
-                            else:
-                                dt = "時刻不明"
-                                
-                            # タイトルをリンクにして表示
+                            source_elem = item.find('source')
+                            publisher = source_elem.text if source_elem is not None else '配信元不明'
+                            
+                            pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
+                            dt = "時刻不明"
+                            
+                            if pub_date_str:
+                                time_tuple = email.utils.parsedate_tz(pub_date_str)
+                                if time_tuple:
+                                    timestamp = email.utils.mktime_tz(time_tuple)
+                                    # 日本時間に変換
+                                    dt_obj = datetime.utcfromtimestamp(timestamp) + timedelta(hours=9)
+                                    dt = dt_obj.strftime('%Y/%m/%d %H:%M')
+                                    
                             st.markdown(f"#### [{title}]({link})")
                             st.caption(f"🏢 配信元: {publisher}  |  🕒 配信日時: {dt} (日本時間)")
                             st.divider()
