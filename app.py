@@ -17,6 +17,28 @@ from deep_translator import GoogleTranslator
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
+# 🌟 スマホ最適化：タブの見切れ防止＆自動折り返しUI
+st.markdown("""
+    <style>
+        .stTabs [data-baseweb="tab-list"] {
+            flex-wrap: wrap !important;
+            row-gap: 8px; /* 改行時の行間の余白 */
+            padding-bottom: 5px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            flex-grow: 1 !important; /* タブの幅を均等に広げる */
+            justify-content: center !important; /* 文字を中央揃えに */
+            border-radius: 8px !important;
+            background-color: rgba(255, 255, 255, 0.05); /* 少し背景色をつけてボタンっぽく */
+            margin-right: 4px;
+            padding: 8px 16px !important;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: rgba(130, 177, 255, 0.15) !important; /* 選択中のタブを強調 */
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # ==========================================
 # 🌟 クラウド同期ヘルパー関数（スプレッドシート連携）
 # ==========================================
@@ -92,7 +114,6 @@ def save_watchlist_to_cloud(market_type, watch_list):
     except Exception as e:
         st.error(f"監視リストのクラウド同期エラー: {e}")
 
-# 🌟 ポートフォリオのクラウド管理機能
 def load_portfolio_from_cloud(market_type):
     try:
         client = get_cloud_client()
@@ -142,7 +163,6 @@ with col_top1:
     st.title("📊 My AI Analyst Dashboard")
 with col_top2:
     st.write("")
-    # 🌟 スマホとPCを一発で同期する強制リロードボタン
     if st.button("🔄 スマホ・PC間を同期", type="primary"):
         with st.spinner("クラウドから最新のリストを読み込み中..."):
             st.session_state.watch_list_us = load_watchlist_from_cloud("US")
@@ -284,7 +304,7 @@ with tab_top:
                     pt = p_tick_raw.strip().upper()
                     if not is_us and pt.isdigit(): pt += ".T"
                     st.session_state[portfolio_key][pt] = {'avg_price': p_price, 'qty': p_qty}
-                    save_portfolio_to_cloud(market_type_str, st.session_state[portfolio_key]) # 🌟 クラウドへ保存
+                    save_portfolio_to_cloud(market_type_str, st.session_state[portfolio_key])
                     st.rerun()
         st.divider()
         if portfolio:
@@ -294,7 +314,7 @@ with tab_top:
                 with col_b:
                     if st.button("削除", key=f"del_port_{is_us}_{t}"): 
                         del st.session_state[portfolio_key][t]
-                        save_portfolio_to_cloud(market_type_str, st.session_state[portfolio_key]) # 🌟 クラウドへ保存
+                        save_portfolio_to_cloud(market_type_str, st.session_state[portfolio_key])
                         st.rerun()
         else: st.info("登録されている銘柄はありません。")
     st.write("")
