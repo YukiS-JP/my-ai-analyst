@@ -112,7 +112,10 @@ if 'portfolio_us' not in st.session_state: st.session_state.portfolio_us = {}
 if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = {}
 if 'company_names' not in st.session_state: st.session_state.company_names = {} 
 if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] 
-if 'last_tracker_data' not in st.session_state: st.session_state.last_tracker_data = []
+
+# 🌟 トラッカーデータを日米で完全に分離！
+if 'last_tracker_data_us' not in st.session_state: st.session_state.last_tracker_data_us = []
+if 'last_tracker_data_jp' not in st.session_state: st.session_state.last_tracker_data_jp = []
 
 # バージョン管理
 if 'wl_ver' not in st.session_state: st.session_state.wl_ver = 0
@@ -120,6 +123,8 @@ if 'mac_ver' not in st.session_state: st.session_state.mac_ver = 0
 
 watch_list_key = 'watch_list_us' if is_us else 'watch_list_jp'
 portfolio_key = 'portfolio_us' if is_us else 'portfolio_jp'
+tracker_data_key = 'last_tracker_data_us' if is_us else 'last_tracker_data_jp'
+
 watch_list = st.session_state[watch_list_key]
 portfolio = st.session_state[portfolio_key]
 
@@ -530,12 +535,11 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー（スマート自動実行 ＆ 並び替え搭載）
+# 🎯 タブ2：個別銘柄トラッカー（日米完全分離対応）
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
 
-    # 🌟 銘柄追加フォーム
     with st.form(key=f"add_ticker_form_{is_us}", clear_on_submit=True):
         col_f1, col_f2 = st.columns([3, 1])
         with col_f1:
@@ -559,7 +563,6 @@ with tab2:
                 time.sleep(0.5)
                 st.rerun()
 
-    # 🌟 リストの削除
     st.markdown("📝 **現在の監視リスト**")
     selected = st.multiselect("「×」でリストから削除できます", options=watch_list, default=watch_list, key=f"t2_select_{is_us}_{st.session_state.wl_ver}")
     if set(selected) != set(watch_list):
@@ -569,7 +572,6 @@ with tab2:
         watch_list = update_watchlist(new_w_list) 
         st.rerun()
 
-    # 🌟 新機能：ドラッグ＆ドロップ並び替えUI
     if len(watch_list) > 1:
         with st.expander("↕️ リストの並び替え（ドラッグ＆ドロップ）"):
             sorted_watch = sort_items(watch_list, key=f"t2_sort_{is_us}_{st.session_state.wl_ver}")
@@ -577,8 +579,6 @@ with tab2:
                 watch_list = update_watchlist(sorted_watch)
                 st.rerun()
 
-    # 🌟 スマート自動実行ロジック
-    # 「最後にデータを取得した時のリスト」と「現在のリスト」が違えば自動実行！
     if f"last_fetched_wl_{is_us}" not in st.session_state:
         st.session_state[f"last_fetched_wl_{is_us}"] = []
     
@@ -586,7 +586,7 @@ with tab2:
 
     if st.button("🔄 最新の株価・AI判定に更新（手動リロード）", key=f"t2_fetch_btn_{is_us}") or auto_fetch:
         with st.spinner('データを取得・計算中...'):
-            st.session_state.last_tracker_data = [] 
+            st.session_state[tracker_data_key] = [] # 🌟 当該市場のメモリだけをリセット
             for sym in watch_list:
                 disp_name = get_company_name(sym) 
                 hist = pd.DataFrame()
@@ -615,17 +615,18 @@ with tab2:
                         elif macd_val > sig_val: signal = f"⚪️【静観】MACDは上向きですが、RSIが割安基準に達していません。"
                         else: signal = f"⚪️【静観】RSIが{rsi_val:.1f}で中立圏。次の波を待つ局面です。"
                         
-                    st.session_state.last_tracker_data.append({
+                    st.session_state[tracker_data_key].append({
                         'ティッカー': disp_name, 'sym': sym, '現在値': close, '日足RSI': rsi_val, 
                         'MACD': macd_val, '週足パフォーマンス(%)': perf_w, '💡 AI判定': signal
                     })
                 except Exception as e: pass
             
-            # 自動取得ループを防ぐため、取得したリストを「最新」として記憶
             st.session_state[f"last_fetched_wl_{is_us}"] = list(watch_list)
 
-    if st.session_state.last_tracker_data:
-        for data in st.session_state.last_tracker_data:
+    # 🌟 当該市場のデータだけを表示
+    current_tracker_data = st.session_state[tracker_data_key]
+    if current_tracker_data:
+        for data in current_tracker_data:
             st.markdown(f"### 📌 {data['ティッカー']} (現在値: {curr_sym}{data['現在値']:,.2f})")
             st.markdown(f"- **日足RSI:** {data['日足RSI']:.1f}  |  **週足パフォーマンス:** {data['週足パフォーマンス(%)']:.1f}%")
             st.info(f"**{data['💡 AI判定']}**"); st.divider()
@@ -640,9 +641,9 @@ with tab2:
                         creds_json = json.loads(st.secrets["google_sheets_creds"])
                         scopes = ['https://www.googleapis.com/auth/spreadsheets']
                         client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
-                        sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0").sheet1
+                        sheet = client.open_by_url(SHEET_URL).sheet1
                         
-                        for data in st.session_state.last_tracker_data:
+                        for data in current_tracker_data:
                             row = [
                                 now_jst.strftime('%Y/%m/%d %H:%M'), 
                                 f"{market_mode.split(' ')[0]} {data['sym']}", 
