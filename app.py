@@ -285,7 +285,7 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🌟 タブ1：全体スクリーニング（日本語翻訳 ＆ 日米別の資金メモリ搭載）
+# 🌟 タブ1：全体スクリーニング（日本株特化の動的フィルター搭載）
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
@@ -304,17 +304,10 @@ with tab1:
     
     col_scr1, col_scr2 = st.columns([4, 2])
     with col_scr1:
-        # 🌟 ここがポイント！米国と日本で初期値（value）と保存キー（key）を完全に分けました。
         if is_us:
-            budget_jpy_man = st.number_input(
-                "💰 今回の投資予定資金（万円）を入力", 
-                min_value=10, max_value=5000, value=100, step=10, key="budget_input_us"
-            )
+            budget_jpy_man = st.number_input("💰 今回の投資予定資金（万円）を入力", min_value=10, max_value=5000, value=100, step=10, key="budget_input_us")
         else:
-            budget_jpy_man = st.number_input(
-                "💰 今回の投資予定資金（万円）を入力", 
-                min_value=10, max_value=5000, value=50, step=10, key="budget_input_jp"
-            )
+            budget_jpy_man = st.number_input("💰 今回の投資予定資金（万円）を入力", min_value=10, max_value=5000, value=50, step=10, key="budget_input_jp")
         budget_jpy = budget_jpy_man * 10_000
 
     with col_scr2:
@@ -348,14 +341,25 @@ with tab1:
                 cols = INDICATOR_MAP[ind]["cols"]; query_cols.extend(cols)
             query_cols = list(set(query_cols))
             
-            min_mcap = 10_000_000_000 if is_us else 100_000_000_000 
-            min_vol = 2_000_000 if is_us else 500_000 
+            # 🌟 日米でフィルター基準と「買える株価」の上限を最適化
+            if is_us:
+                min_mcap = 10_000_000_000  # 100億ドル
+                max_mcap = 10_000_000_000_000 # 上限なし
+                min_vol = 2_000_000
+                max_price = budget_target  # 米国は1株から買えるので予算全額が上限
+            else:
+                min_mcap = 30_000_000_000  # 日本は300億円以上（中型株も拾う）
+                max_mcap = 1_000_000_000_000  # 🌟 1兆円未満（トヨタやメガバンク等の値動きが重い超大型株を除外）
+                min_vol = 300_000
+                max_price = budget_target / 100  # 🌟 日本は100株単位なので、1株あたりの上限価格を算出
             
             conditions = [
                 Column('market_cap_basic') > min_mcap,
+                Column('market_cap_basic') < max_mcap,  # 超大型除外
                 Column('volume') > min_vol,
                 Column('price_earnings_ttm') > 0,
-                Column('RSI') < 40  
+                Column('RSI') < 40,
+                Column('close') <= max_price  # 🌟 予算内で「絶対に」買える銘柄だけを抽出
             ]
                 
             q = (Query().select(*query_cols).where(*conditions).order_by('market_cap_basic', ascending=False).limit(10))
@@ -448,7 +452,7 @@ with tab1:
                     if reasons: st.info("💡 **その他のファンダメンタル分析:**\n\n" + "\n".join([f"- {r}" for r in reasons]))
                     st.divider()
             else:
-                st.warning("現在、厳しい条件（RSI40未満など）を満たす銘柄は見つかりませんでした。\n相場全体が過熱しているか、優良な押し目がない状態です。無駄なトレードを避け、資金を温存して静観を推奨します。")
+                st.warning("現在、厳しい条件（RSI40未満、予算内の株価など）を満たす銘柄は見つかりませんでした。\n相場全体が過熱しているか、優良な押し目がない状態です。無駄なトレードを避け、資金を温存して静観を推奨します。")
 
 # ==========================================
 # タブ2＆3：トラッカー・ニュース
