@@ -29,6 +29,7 @@ market_mode = st.radio(
 )
 is_us = (market_mode == "🇺🇸 米国市場 (US)")
 
+# 通貨・市場・サフィックス設定
 curr_sym = "$" if is_us else "¥"
 market_name_tv = 'america' if is_us else 'japan'
 ticker_suffix_hint = "" if is_us else " (例: 7203.T)"
@@ -39,7 +40,14 @@ if 'watch_list_jp' not in st.session_state: st.session_state.watch_list_jp = ["7
 if 'portfolio_us' not in st.session_state: st.session_state.portfolio_us = {}
 if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = {}
 if 'company_names' not in st.session_state: st.session_state.company_names = {} 
-if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] # 🌟 履歴保存用メモリ
+if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] 
+if 'saved_dates' not in st.session_state: st.session_state.saved_dates = {'🇺🇸 米国市場 (US)': None, '🇯🇵 日本市場 (JP)': None} # 🌟 保存日メモリ
+if 'current_market_mode' not in st.session_state: st.session_state.current_market_mode = market_mode
+
+# 🌟 市場を切り替えたら、表示中のスクリーニングデータをリセット（誤保存防止）
+if st.session_state.current_market_mode != market_mode:
+    st.session_state.last_screened_data = []
+    st.session_state.current_market_mode = market_mode
 
 watch_list_key = 'watch_list_us' if is_us else 'watch_list_jp'
 portfolio_key = 'portfolio_us' if is_us else 'portfolio_jp'
@@ -76,11 +84,16 @@ def get_company_name(sym):
         return sym
     except: return sym
 
-now_jst = datetime.utcnow() + timedelta(hours=9)
+# 🌟 現在の市場に応じた「今日の日付」を計算（米国はNY時間、日本は日本時間）
+now_utc = datetime.utcnow()
+if is_us:
+    current_market_date = (now_utc - timedelta(hours=5)).strftime('%Y-%m-%d') # NY時間(おおよそ)
+else:
+    current_market_date = (now_utc + timedelta(hours=9)).strftime('%Y-%m-%d') # 日本時間
 
-# ==========================================
-# 🌟 【新機能】月末のAIコンサル要求アラート（毎月25日以降に表示）
-# ==========================================
+now_jst = now_utc + timedelta(hours=9)
+
+# 月末のAIコンサル要求アラート
 if now_jst.day >= 25:
     st.info("💡 **【AIアナリストからのコンサルティング要求】**\n月末が近づいています！スプレッドシートに蓄積された「スクリーニング履歴」のデータをコピーして、私（AI）に分析をご依頼ください。抽出銘柄の勝率を割り出し、来月に向けてフィルターの精度を上げるための学習アップデートを行いましょう！")
 
@@ -266,7 +279,7 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🌟 タブ1：全体スクリーニング（履歴保存機能付き）
+# 🌟 タブ1：全体スクリーニング（二重保存防止機能付き）
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
@@ -291,7 +304,7 @@ with tab1:
                 if sorted_inds != st.session_state.screener_indicators: st.session_state.screener_indicators = sorted_inds; st.rerun()
 
     if st.button(f"🚀 {market_mode.split(' ')[0]}の厳選チャンス銘柄をスクリーニング"):
-        st.session_state.last_screened_data = [] # 🌟 新しい検索で履歴をリセット
+        st.session_state.last_screened_data = [] # 新しい検索で履歴をリセット
         
         with st.spinner(f'{market_mode}から厳しい条件に合う銘柄を抽出中...'):
             try: usd_jpy = yf.Ticker("JPY=X").history(period="1d")['Close'].iloc[-1]
@@ -360,7 +373,7 @@ with tab1:
                         
                     st.error(f"**{conviction_title}**\n\n**推奨購入目安:** 約 {shares_to_buy:,} 株\n\n*{strategy_msg}*")
                     
-                    # 🌟 履歴保存用のデータを生成
+                    # 履歴保存用のデータを生成
                     rsi_val = row.get('RSI')
                     st.session_state.last_screened_data.append([
                         now_jst.strftime('%Y/%m/%d'),
@@ -403,31 +416,38 @@ with tab1:
             else:
                 st.warning("現在、厳しい条件を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
 
-    # 🌟 結果が出ている場合のみ「保存ボタン」を表示
+    # 🌟 結果が出ていて、かつ「今日まだ保存していない」場合のみボタンを表示
     if st.session_state.last_screened_data:
         st.write("")
-        if st.button("💾 このスクリーニング結果をスプレッドシートに保存（学習用）", type="primary"):
-            with st.spinner("データを保存中..."):
-                try:
-                    creds_json = json.loads(st.secrets["google_sheets_creds"])
-                    scopes = ['https://www.googleapis.com/auth/spreadsheets']
-                    client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
-                    sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0")
-                    
-                    # 🌟 「スクリーニング履歴」タブがなければ自動で作成する安全設計
+        if st.session_state.saved_dates[market_mode] == current_market_date:
+            st.success(f"✅ 本日（{current_market_date}）の {market_mode.split(' ')[0]} のスクリーニングデータは保存済みです！\n二重保存（AIの学習ノイズ）を防ぐため、ボタンを非表示にしています。明日の相場更新をお待ちください。")
+        else:
+            if st.button("💾 このスクリーニング結果をスプレッドシートに保存（学習用）", type="primary"):
+                with st.spinner("データを保存中..."):
                     try:
-                        ws = sheet.worksheet("スクリーニング履歴")
-                    except gspread.exceptions.WorksheetNotFound:
-                        ws = sheet.add_worksheet(title="スクリーニング履歴", rows="1000", cols="10")
-                        ws.append_row(["取得日付", "市場", "ティッカー", "現在値", "判定", "推奨購入株数", "RSI", "MACD"])
+                        creds_json = json.loads(st.secrets["google_sheets_creds"])
+                        scopes = ['https://www.googleapis.com/auth/spreadsheets']
+                        client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
+                        sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0")
+                        
+                        try:
+                            ws = sheet.worksheet("スクリーニング履歴")
+                        except gspread.exceptions.WorksheetNotFound:
+                            ws = sheet.add_worksheet(title="スクリーニング履歴", rows="1000", cols="10")
+                            ws.append_row(["取得日付", "市場", "ティッカー", "現在値", "判定", "推奨購入株数", "RSI", "MACD"])
 
-                    for row in st.session_state.last_screened_data:
-                        ws.append_row(row)
-                    
-                    st.success("✅ スプレッドシートの「スクリーニング履歴」タブに保存しました！月末のAIコンサルにご活用ください。")
-                    st.session_state.last_screened_data = [] # 保存後はメモリをクリア
-                except Exception as e:
-                    st.error(f"保存に失敗しました: {e}")
+                        for row in st.session_state.last_screened_data:
+                            ws.append_row(row)
+                        
+                        # 保存日をメモリに記録し、データをクリア
+                        st.session_state.saved_dates[market_mode] = current_market_date
+                        st.session_state.last_screened_data = [] 
+                        
+                        st.success("✅ スプレッドシートの「スクリーニング履歴」タブに保存しました！")
+                        time.sleep(1.5) # サクセスメッセージを少し見せてからリロード
+                        st.rerun() # 画面をリロードしてボタンを消す
+                    except Exception as e:
+                        st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
 # タブ2＆3：トラッカー・ニュース
@@ -527,10 +547,17 @@ with tab3:
                         with urllib.request.urlopen(req) as response: xml_data = response.read()
                         root = ET.fromstring(xml_data); items = root.findall('.//item')
                         if items:
-                            for item in items[:3]: display_news_item(item)
-                            if len(items) > 3:
-                                with st.expander(f"🔽 {disp_name} のその他のニュースを見る"):
-                                    for item in items[3:10]: display_news_item(item); st.write("") 
+                            for item in items[:3]:
+                                title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
+                                link = item.find('link').text if item.find('link') is not None else '#'
+                                pub = item.find('source').text if item.find('source') is not None else '配信元不明'
+                                dt = "時刻不明"
+                                pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
+                                if pub_date_str:
+                                    t_tuple = email.utils.parsedate_tz(pub_date_str)
+                                    if t_tuple: dt = (datetime.utcfromtimestamp(email.utils.mktime_tz(t_tuple)) + timedelta(hours=9)).strftime('%Y/%m/%d %H:%M')
+                                st.markdown(f"**[{title}]({link})**")
+                                st.caption(f"🏢 {pub}  |  🕒 {dt}")
                         else: st.info("ニュースは見つかりませんでした。")
                     except Exception as e: st.error("ニュース取得中にエラーが発生しました。")
                     st.divider()
