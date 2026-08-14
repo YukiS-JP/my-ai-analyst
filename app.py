@@ -27,7 +27,6 @@ def get_cloud_client():
     scopes = ['https://www.googleapis.com/auth/spreadsheets']
     return gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
 
-# 1. すでに保存済みか確認 (端末間同期)
 def check_already_saved(market_mode, current_date, sheet_type="screener"):
     try:
         client = get_cloud_client()
@@ -50,7 +49,6 @@ def check_already_saved(market_mode, current_date, sheet_type="screener"):
     except:
         return False
 
-# 2. クラウドから監視リストをロード
 def load_watchlist_from_cloud(market_type):
     default_us = ["SOXL", "RDW", "DNA", "FNGU"]
     default_jp = ["7203.T", "1959.T", "8035.T", "9984.T"]
@@ -73,7 +71,6 @@ def load_watchlist_from_cloud(market_type):
     except:
         return defaults
 
-# 3. クラウドへ監視リストをセーブ
 def save_watchlist_to_cloud(market_type, watch_list):
     try:
         client = get_cloud_client()
@@ -85,7 +82,6 @@ def save_watchlist_to_cloud(market_type, watch_list):
             ws.append_row(["市場", "ティッカー"])
             
         vals = ws.get_all_values()
-        # 該当市場以外を残して再構築
         new_rows = [row for row in vals if row[0] != market_type]
         for sym in watch_list:
             new_rows.append([market_type, sym])
@@ -508,28 +504,36 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー
+# 🎯 タブ2：個別銘柄トラッカー（st.formによるリアルタイム確実追加）
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
-    col1, col2 = st.columns([3, 1])
-    with col1: new_ticker_raw = st.text_input(f"➕ 新しい銘柄を追加{ticker_suffix_hint}", key=f"t2_add_{is_us}")
-    with col2:
-        st.write(""); st.write("")
-        if st.button("追加する", key=f"t2_add_btn_{is_us}"):
+
+    # 🌟 st.formを使うことで、入力と追加ボタンの競合（状態の巻き戻りバグ）を完全に解消
+    with st.form(key=f"add_ticker_form_{is_us}", clear_on_submit=True):
+        col_f1, col_f2 = st.columns([3, 1])
+        with col_f1:
+            new_ticker_raw = st.text_input(f"➕ 新しい銘柄を追加{ticker_suffix_hint}", placeholder="例: 7203 または 7203.T")
+        with col_f2:
+            st.write("")
+            st.write("")
+            submitted = st.form_submit_button("追加する")
+            
+        if submitted and new_ticker_raw:
             clean_ticker = new_ticker_raw.strip().upper()
-            if not is_us and clean_ticker.isdigit(): clean_ticker += ".T"
+            if not is_us and clean_ticker.isdigit(): 
+                clean_ticker += ".T"
             
             if clean_ticker in watch_list:
                 st.warning(f"⚠️ 「{clean_ticker}」はすでに監視リストに登録されています。")
-            elif clean_ticker:
+            else:
                 watch_list.append(clean_ticker)
                 save_watchlist_to_cloud(market_type_str, watch_list)
-                st.success(f"✅ 「{clean_ticker}」を追加しました！")
-                time.sleep(0.8)
-                st.rerun() 
-                
-    selected = st.multiselect("📝 現在の監視リスト", options=watch_list, default=watch_list, key=f"t2_select_{is_us}")
+                st.success(f"✅ 「{clean_ticker}」をリアルタイム追加しました！")
+                time.sleep(0.5)
+                st.rerun()
+
+    selected = st.multiselect("📝 現在の監視リスト（削除や選択変更）", options=watch_list, default=watch_list, key=f"t2_select_{is_us}")
     if selected != watch_list:
         st.session_state[watch_list_key] = selected
         save_watchlist_to_cloud(market_type_str, selected)
