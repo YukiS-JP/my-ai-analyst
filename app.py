@@ -423,7 +423,7 @@ with tab1:
                     st.markdown(f"- **取得データ:** " + " ｜ ".join(metrics_strs))
                     st.divider()
             else:
-                st.warning("現在、厳しい条件を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
+                st.warning("現在、厳しい条件（50日線・200日線の上、RSI40未満など）を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
 
     if st.session_state.last_screened_data:
         st.write("")
@@ -448,7 +448,7 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー
+# 🎯 タブ2：個別銘柄トラッカー（重複追加ガード付き）
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
@@ -459,8 +459,16 @@ with tab2:
         if st.button("追加する", key=f"t2_add_btn_{is_us}"):
             clean_ticker = new_ticker_raw.strip().upper()
             if not is_us and clean_ticker.isdigit(): clean_ticker += ".T"
-            if clean_ticker and clean_ticker not in watch_list:
-                st.session_state[watch_list_key].append(clean_ticker); st.rerun() 
+            
+            # 🌟 すでにリストに存在するかチェック
+            if clean_ticker in watch_list:
+                st.warning(f"⚠️ 「{clean_ticker}」はすでに監視リストに登録されています。")
+            elif clean_ticker:
+                st.session_state[watch_list_key].append(clean_ticker)
+                st.success(f"✅ 「{clean_ticker}」を追加しました！")
+                time.sleep(0.8)
+                st.rerun() 
+                
     selected = st.multiselect("📝 現在の監視リスト", options=watch_list, default=watch_list, key=f"t2_select_{is_us}")
     if selected != watch_list: st.session_state[watch_list_key] = selected; st.rerun()
 
