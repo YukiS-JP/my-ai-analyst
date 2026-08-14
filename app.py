@@ -41,10 +41,10 @@ if 'portfolio_us' not in st.session_state: st.session_state.portfolio_us = {}
 if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = {}
 if 'company_names' not in st.session_state: st.session_state.company_names = {} 
 if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] 
-if 'saved_dates' not in st.session_state: st.session_state.saved_dates = {'🇺🇸 米国市場 (US)': None, '🇯🇵 日本市場 (JP)': None} # 🌟 保存日メモリ
+if 'saved_dates' not in st.session_state: st.session_state.saved_dates = {'🇺🇸 米国市場 (US)': None, '🇯🇵 日本市場 (JP)': None} 
 if 'current_market_mode' not in st.session_state: st.session_state.current_market_mode = market_mode
 
-# 🌟 市場を切り替えたら、表示中のスクリーニングデータをリセット（誤保存防止）
+# 🌟 市場を切り替えたら、表示中のスクリーニングデータをリセット
 if st.session_state.current_market_mode != market_mode:
     st.session_state.last_screened_data = []
     st.session_state.current_market_mode = market_mode
@@ -84,16 +84,14 @@ def get_company_name(sym):
         return sym
     except: return sym
 
-# 🌟 現在の市場に応じた「今日の日付」を計算（米国はNY時間、日本は日本時間）
 now_utc = datetime.utcnow()
 if is_us:
-    current_market_date = (now_utc - timedelta(hours=5)).strftime('%Y-%m-%d') # NY時間(おおよそ)
+    current_market_date = (now_utc - timedelta(hours=5)).strftime('%Y-%m-%d')
 else:
-    current_market_date = (now_utc + timedelta(hours=9)).strftime('%Y-%m-%d') # 日本時間
+    current_market_date = (now_utc + timedelta(hours=9)).strftime('%Y-%m-%d')
 
 now_jst = now_utc + timedelta(hours=9)
 
-# 月末のAIコンサル要求アラート
 if now_jst.day >= 25:
     st.info("💡 **【AIアナリストからのコンサルティング要求】**\n月末が近づいています！スプレッドシートに蓄積された「スクリーニング履歴」のデータをコピーして、私（AI）に分析をご依頼ください。抽出銘柄の勝率を割り出し、来月に向けてフィルターの精度を上げるための学習アップデートを行いましょう！")
 
@@ -125,12 +123,12 @@ with tab_top:
 
     with st.expander(f"💼 {market_mode.split(' ')[0]} ポートフォリオの編集"):
         c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-        with c1: p_tick = st.text_input(f"ティッカー{ticker_suffix_hint}", key="p_tick")
-        with c2: p_price = st.number_input(f"平均取得単価 ({curr_sym})", min_value=0.0, step=0.1 if is_us else 1.0, format="%.2f", key="p_price")
-        with c3: p_qty = st.number_input("保有数量 (株)", min_value=0.0, step=1.0, format="%.2f", key="p_qty")
+        with c1: p_tick = st.text_input(f"ティッカー{ticker_suffix_hint}", key=f"p_tick_{is_us}")
+        with c2: p_price = st.number_input(f"平均取得単価 ({curr_sym})", min_value=0.0, step=0.1 if is_us else 1.0, format="%.2f", key=f"p_price_{is_us}")
+        with c3: p_qty = st.number_input("保有数量 (株)", min_value=0.0, step=1.0, format="%.2f", key=f"p_qty_{is_us}")
         with c4:
             st.write(""); st.write("")
-            if st.button("登録", key="p_add"):
+            if st.button("登録", key=f"p_add_{is_us}"):
                 if p_tick and p_qty > 0:
                     st.session_state[portfolio_key][p_tick.strip().upper()] = {'avg_price': p_price, 'qty': p_qty}; st.rerun()
         st.divider()
@@ -139,7 +137,7 @@ with tab_top:
                 col_a, col_b = st.columns([5, 1])
                 with col_a: st.write(f"**{get_company_name(t)}** : {portfolio[t]['qty']:,.2f} 株 (平均 {curr_sym}{portfolio[t]['avg_price']:,.2f})")
                 with col_b:
-                    if st.button("削除", key=f"del_port_{t}"): del st.session_state[portfolio_key][t]; st.rerun()
+                    if st.button("削除", key=f"del_port_{is_us}_{t}"): del st.session_state[portfolio_key][t]; st.rerun()
         else: st.info("登録されている銘柄はありません。")
     st.write("")
 
@@ -183,21 +181,21 @@ with tab_top:
         with col1: st.subheader("🌍 主要市場サマリー")
         with col2:
             with st.popover("⚙️ 編集"):
-                new_macro_name = st.text_input("📝 表示名", key="mac_name"); new_macro_tick = st.text_input("🔤 ティッカー", key="mac_tick")
-                if st.button("➕ 追加する", key="add_macro_btn"):
+                new_macro_name = st.text_input("📝 表示名", key=f"mac_name_{is_us}"); new_macro_tick = st.text_input("🔤 ティッカー", key=f"mac_tick_{is_us}")
+                if st.button("➕ 追加する", key=f"add_macro_btn_{is_us}"):
                     if new_macro_name and new_macro_tick:
                         st.session_state.macro_dict[new_macro_name] = new_macro_tick
                         if new_macro_name not in st.session_state.macro_display_list: st.session_state.macro_display_list.append(new_macro_name)
                         st.rerun()
                 st.divider()
-                selected_macros = st.multiselect("表示", options=list(st.session_state.macro_dict.keys()), default=st.session_state.macro_display_list, key="macro_select")
+                selected_macros = st.multiselect("表示", options=list(st.session_state.macro_dict.keys()), default=st.session_state.macro_display_list, key=f"macro_select_{is_us}")
                 if set(selected_macros) != set(st.session_state.macro_display_list):
                     new_list = [m for m in st.session_state.macro_display_list if m in selected_macros]
                     for m in selected_macros:
                         if m not in new_list: new_list.append(m)
                     st.session_state.macro_display_list = new_list; st.rerun()
                 if st.session_state.macro_display_list:
-                    sorted_macros = sort_items(st.session_state.macro_display_list, key="macro_sort")
+                    sorted_macros = sort_items(st.session_state.macro_display_list, key=f"macro_sort_{is_us}")
                     if sorted_macros != st.session_state.macro_display_list: st.session_state.macro_display_list = sorted_macros; st.rerun()
 
         html_macro = "<div class='dashboard-panel'>"
@@ -221,19 +219,19 @@ with tab_top:
         with col3: st.subheader(f"📌 {market_mode.split(' ')[0]} 監視銘柄 データ一覧")
         with col4:
             with st.popover("⚙️ 編集"):
-                new_watch_tick = st.text_input(f"🔤 ティッカー{ticker_suffix_hint}", key="watch_tick")
-                if st.button("➕ 追加", key="add_watch_btn"):
+                new_watch_tick = st.text_input(f"🔤 ティッカー{ticker_suffix_hint}", key=f"watch_tick_{is_us}")
+                if st.button("➕ 追加", key=f"add_watch_btn_{is_us}"):
                     c_tick = new_watch_tick.strip().upper()
                     if c_tick and c_tick not in watch_list: st.session_state[watch_list_key].append(c_tick); st.rerun()
                 st.divider()
-                selected_watch = st.multiselect("表示", options=watch_list, default=watch_list, key="watch_select")
+                selected_watch = st.multiselect("表示", options=watch_list, default=watch_list, key=f"watch_select_{is_us}")
                 if set(selected_watch) != set(watch_list):
                     new_w_list = [m for m in watch_list if m in selected_watch]
                     for m in selected_watch:
                         if m not in new_w_list: new_w_list.append(m)
                     st.session_state[watch_list_key] = new_w_list; st.rerun()
                 if watch_list:
-                    sorted_watch = sort_items(watch_list, key="watch_sort_dd")
+                    sorted_watch = sort_items(watch_list, key=f"watch_sort_dd_{is_us}")
                     if sorted_watch != watch_list: st.session_state[watch_list_key] = sorted_watch; st.rerun()
 
         html_watch = "<div class='dashboard-panel'>"
@@ -266,7 +264,7 @@ with tab_top:
                         html_watch += f"<div class='item-row sym-title'>🔹 {disp_name}</div>"
                         html_watch += f"<div class='item-sub-row'>┣ <strong>現在値:</strong> {curr_sym}{curr_p:,.2f} (前日比: {d_trend})<br>┣ <strong>前週比:</strong> <span class='{week_color}'>{week_pct:+.2f}%</span> ｜ <strong>前月比:</strong> <span class='{month_color}'>{month_pct:+.2f}%</span><br>┗ <strong>RSI:</strong> {rsi_val:.1f} ({rsi_stat}) ｜ <strong>高値差:</strong> {dd_52:+.1f}%</div>"
                 except: html_watch += f"<div class='item-row sym-title'>🔹 {disp_name}</div><div class='item-sub-row'>データ取得エラー</div>"
-        else: html_watch += "<div class='item-row val-neutral'>表示する銘柄がありません。</div>"
+        else: html_watch += "<div class='item-row val-neutral'>表示する銘柄がありません。⚙️編集から追加してください。</div>"
         html_watch += "</div>"
         st.markdown(html_watch, unsafe_allow_html=True)
     
@@ -279,7 +277,7 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🌟 タブ1：全体スクリーニング（二重保存防止機能付き）
+# 🌟 タブ1：全体スクリーニング
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
@@ -293,18 +291,18 @@ with tab1:
     with col_scr2:
         with st.popover("⚙️ 指標の編集"):
             st.markdown("**追加と並び替え**")
-            selected_inds = st.multiselect("表示する指標", options=list(INDICATOR_MAP.keys()), default=st.session_state.screener_indicators, key="scr_select")
+            selected_inds = st.multiselect("表示する指標", options=list(INDICATOR_MAP.keys()), default=st.session_state.screener_indicators, key=f"scr_select_{is_us}")
             if set(selected_inds) != set(st.session_state.screener_indicators):
                 new_list = [m for m in st.session_state.screener_indicators if m in selected_inds]
                 for m in selected_inds:
                     if m not in new_list: new_list.append(m)
                 st.session_state.screener_indicators = new_list; st.rerun()
             if st.session_state.screener_indicators:
-                sorted_inds = sort_items(st.session_state.screener_indicators, key="scr_sort_dd")
+                sorted_inds = sort_items(st.session_state.screener_indicators, key=f"scr_sort_dd_{is_us}")
                 if sorted_inds != st.session_state.screener_indicators: st.session_state.screener_indicators = sorted_inds; st.rerun()
 
-    if st.button(f"🚀 {market_mode.split(' ')[0]}の厳選チャンス銘柄をスクリーニング"):
-        st.session_state.last_screened_data = [] # 新しい検索で履歴をリセット
+    if st.button(f"🚀 {market_mode.split(' ')[0]}の厳選チャンス銘柄をスクリーニング", key=f"scr_run_btn_{is_us}"):
+        st.session_state.last_screened_data = [] 
         
         with st.spinner(f'{market_mode}から厳しい条件に合う銘柄を抽出中...'):
             try: usd_jpy = yf.Ticker("JPY=X").history(period="1d")['Close'].iloc[-1]
@@ -355,14 +353,10 @@ with tab1:
                     is_golden_cross = (macd > sig) if pd.notna(macd) and pd.notna(sig) else False
                         
                     if is_golden_cross:
-                        conv_type = "本気買い"
-                        conviction_title = "🔥 本気買い（フル・エントリー）"
-                        alloc_pct = 1.0
+                        conv_type = "本気買い"; conviction_title = "🔥 本気買い（フル・エントリー）"; alloc_pct = 1.0
                         strategy_msg = "長期トレンド（200日線）が上向きの中で、MACDのゴールデンクロスが確認されました。絶好の押し目買いのタイミングです。"
                     else:
-                        conv_type = "打診買い"
-                        conviction_title = "💧 打診買い（テスト・エントリー）"
-                        alloc_pct = 0.3
+                        conv_type = "打診買い"; conviction_title = "💧 打診買い（テスト・エントリー）"; alloc_pct = 0.3
                         strategy_msg = "長期トレンドは上向きでRSIも割安ですが、MACDがまだ下落を示しています。底探りの段階です。"
 
                     alloc_target = budget_target * alloc_pct
@@ -373,17 +367,11 @@ with tab1:
                         
                     st.error(f"**{conviction_title}**\n\n**推奨購入目安:** 約 {shares_to_buy:,} 株\n\n*{strategy_msg}*")
                     
-                    # 履歴保存用のデータを生成
                     rsi_val = row.get('RSI')
                     st.session_state.last_screened_data.append([
-                        now_jst.strftime('%Y/%m/%d'),
-                        market_mode.split(' ')[0],
-                        sym_name,
-                        round(curr_price, 2),
-                        conv_type,
-                        shares_to_buy,
-                        round(rsi_val, 1) if pd.notna(rsi_val) else "",
-                        round(macd, 2) if pd.notna(macd) else ""
+                        now_jst.strftime('%Y/%m/%d'), market_mode.split(' ')[0], sym_name,
+                        round(curr_price, 2), conv_type, shares_to_buy,
+                        round(rsi_val, 1) if pd.notna(rsi_val) else "", round(macd, 2) if pd.notna(macd) else ""
                     ])
 
                     metrics_strs = []; reasons = []
@@ -416,38 +404,29 @@ with tab1:
             else:
                 st.warning("現在、厳しい条件を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
 
-    # 🌟 結果が出ていて、かつ「今日まだ保存していない」場合のみボタンを表示
     if st.session_state.last_screened_data:
         st.write("")
         if st.session_state.saved_dates[market_mode] == current_market_date:
             st.success(f"✅ 本日（{current_market_date}）の {market_mode.split(' ')[0]} のスクリーニングデータは保存済みです！\n二重保存（AIの学習ノイズ）を防ぐため、ボタンを非表示にしています。明日の相場更新をお待ちください。")
         else:
-            if st.button("💾 このスクリーニング結果をスプレッドシートに保存（学習用）", type="primary"):
+            if st.button("💾 このスクリーニング結果をスプレッドシートに保存（学習用）", type="primary", key=f"scr_save_btn_{is_us}"):
                 with st.spinner("データを保存中..."):
                     try:
                         creds_json = json.loads(st.secrets["google_sheets_creds"])
                         scopes = ['https://www.googleapis.com/auth/spreadsheets']
                         client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
                         sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0")
-                        
-                        try:
-                            ws = sheet.worksheet("スクリーニング履歴")
+                        try: ws = sheet.worksheet("スクリーニング履歴")
                         except gspread.exceptions.WorksheetNotFound:
                             ws = sheet.add_worksheet(title="スクリーニング履歴", rows="1000", cols="10")
                             ws.append_row(["取得日付", "市場", "ティッカー", "現在値", "判定", "推奨購入株数", "RSI", "MACD"])
 
-                        for row in st.session_state.last_screened_data:
-                            ws.append_row(row)
-                        
-                        # 保存日をメモリに記録し、データをクリア
+                        for row in st.session_state.last_screened_data: ws.append_row(row)
                         st.session_state.saved_dates[market_mode] = current_market_date
                         st.session_state.last_screened_data = [] 
-                        
                         st.success("✅ スプレッドシートの「スクリーニング履歴」タブに保存しました！")
-                        time.sleep(1.5) # サクセスメッセージを少し見せてからリロード
-                        st.rerun() # 画面をリロードしてボタンを消す
-                    except Exception as e:
-                        st.error(f"保存に失敗しました: {e}")
+                        time.sleep(1.5); st.rerun() 
+                    except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
 # タブ2＆3：トラッカー・ニュース
@@ -455,17 +434,17 @@ with tab1:
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに自動記録**します。")
     col1, col2 = st.columns([3, 1])
-    with col1: new_ticker = st.text_input(f"➕ 新しい銘柄を追加{ticker_suffix_hint}", key="t2_add")
+    with col1: new_ticker = st.text_input(f"➕ 新しい銘柄を追加{ticker_suffix_hint}", key=f"t2_add_{is_us}")
     with col2:
         st.write(""); st.write("")
-        if st.button("追加する", key="t2_add_btn"):
+        if st.button("追加する", key=f"t2_add_btn_{is_us}"):
             clean_ticker = new_ticker.strip().upper()
             if clean_ticker and clean_ticker not in watch_list:
                 st.session_state[watch_list_key].append(clean_ticker); st.rerun() 
-    selected = st.multiselect("📝 現在の監視リスト", options=watch_list, default=watch_list, key="t2_select")
+    selected = st.multiselect("📝 現在の監視リスト", options=watch_list, default=watch_list, key=f"t2_select_{is_us}")
     if selected != watch_list: st.session_state[watch_list_key] = selected; st.rerun()
 
-    if st.button("🎯 最新データを取得 ＆ シートに仮想売買を記録"):
+    if st.button("🎯 最新データを取得 ＆ シートに仮想売買を記録", key=f"t2_record_btn_{is_us}"):
         with st.spinner('データを取得・計算し、スプレッドシートに記録中...'):
             data_list = []; rows_to_append = []
             for sym in watch_list:
@@ -519,7 +498,7 @@ with tab2:
 with tab3:
     st.write("監視中の**全銘柄**に関連する最新ニュースを一覧でチェックできます。")
     if watch_list:
-        if st.button("📰 監視リストの最新ニュースを一括取得"):
+        if st.button("📰 監視リストの最新ニュースを一括取得", key=f"news_btn_{is_us}"):
             with st.spinner('全銘柄のニュースを検索中...'):
                 def display_news_item(item):
                     title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
@@ -547,17 +526,10 @@ with tab3:
                         with urllib.request.urlopen(req) as response: xml_data = response.read()
                         root = ET.fromstring(xml_data); items = root.findall('.//item')
                         if items:
-                            for item in items[:3]:
-                                title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
-                                link = item.find('link').text if item.find('link') is not None else '#'
-                                pub = item.find('source').text if item.find('source') is not None else '配信元不明'
-                                dt = "時刻不明"
-                                pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
-                                if pub_date_str:
-                                    t_tuple = email.utils.parsedate_tz(pub_date_str)
-                                    if t_tuple: dt = (datetime.utcfromtimestamp(email.utils.mktime_tz(t_tuple)) + timedelta(hours=9)).strftime('%Y/%m/%d %H:%M')
-                                st.markdown(f"**[{title}]({link})**")
-                                st.caption(f"🏢 {pub}  |  🕒 {dt}")
+                            for item in items[:3]: display_news_item(item)
+                            if len(items) > 3:
+                                with st.expander(f"🔽 {disp_name} のその他のニュースを見る"):
+                                    for item in items[3:10]: display_news_item(item); st.write("") 
                         else: st.info("ニュースは見つかりませんでした。")
                     except Exception as e: st.error("ニュース取得中にエラーが発生しました。")
                     st.divider()
