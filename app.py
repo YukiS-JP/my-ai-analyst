@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 import email.utils
 import streamlit.components.v1 as components
 from streamlit_sortables import sort_items
-from deep_translator import GoogleTranslator  # 🌟 翻訳ツールを追加
+from deep_translator import GoogleTranslator
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -73,7 +73,6 @@ def get_company_name(sym):
         info = yf.Ticker(sym).info
         name_en = info.get('shortName') or info.get('longName') or ""
         if name_en:
-            # 取得した英語名を日本語に翻訳
             name_ja = GoogleTranslator(source='en', target='ja').translate(name_en)
             st.session_state.company_names[sym] = name_ja
             return f"{sym} {name_ja}"
@@ -108,7 +107,7 @@ with tab_top:
     """, unsafe_allow_html=True)
 
     with st.expander(f"💼 {market_mode.split(' ')[0]} ポートフォリオの編集（保有銘柄の登録・削除）"):
-        st.markdown(f"**1️⃣ 保今銘柄の登録・更新**")
+        st.markdown(f"**1️⃣ 保有銘柄の登録・更新**")
         c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
         with c1: p_tick = st.text_input(f"ティッカー{ticker_suffix_hint}", key="p_tick")
         with c2: p_price = st.number_input(f"平均取得単価 ({curr_sym})", min_value=0.0, step=0.1 if is_us else 1.0, format="%.2f", key="p_price")
@@ -286,7 +285,7 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🌟 タブ1：全体スクリーニング（日本語翻訳搭載）
+# 🌟 タブ1：全体スクリーニング（日本語翻訳 ＆ 日米別の資金メモリ搭載）
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
@@ -305,8 +304,19 @@ with tab1:
     
     col_scr1, col_scr2 = st.columns([4, 2])
     with col_scr1:
-        budget_jpy_man = st.number_input("💰 今回の投資予定資金（万円）を入力", min_value=10, max_value=5000, value=100, step=10)
+        # 🌟 ここがポイント！米国と日本で初期値（value）と保存キー（key）を完全に分けました。
+        if is_us:
+            budget_jpy_man = st.number_input(
+                "💰 今回の投資予定資金（万円）を入力", 
+                min_value=10, max_value=5000, value=100, step=10, key="budget_input_us"
+            )
+        else:
+            budget_jpy_man = st.number_input(
+                "💰 今回の投資予定資金（万円）を入力", 
+                min_value=10, max_value=5000, value=50, step=10, key="budget_input_jp"
+            )
         budget_jpy = budget_jpy_man * 10_000
+
     with col_scr2:
         with st.popover("⚙️ 指標の編集"):
             st.markdown("**追加と並び替え**")
@@ -357,15 +367,13 @@ with tab1:
                 st.success(f"🎯 厳格なスクリーニングを通過した銘柄です！")
                 
                 for index, row in df.iterrows():
-                    # 🌟 企業名を翻訳して整形
                     if is_us: 
                         sym_name = row['name']
                     else:
                         raw_name = row['name']
                         desc_en = row.get('description', '')
                         try:
-                            # 英語の企業名を日本語に翻訳
-                            desc_ja = GoogleTranslator(source='en', target='ja').translate(desc_en)
+                            desc_ja = GoogleTranslator(source='en', target='ja').translate(desc_en) if desc_en else ''
                         except:
                             desc_ja = desc_en
                         sym_name = f"{raw_name}.T {desc_ja}"
