@@ -114,7 +114,7 @@ if 'company_names' not in st.session_state: st.session_state.company_names = {}
 if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] 
 if 'last_tracker_data' not in st.session_state: st.session_state.last_tracker_data = []
 
-# 🌟 巻き戻りバグ防止用バージョン管理（ここが今回のキモです）
+# バージョン管理
 if 'wl_ver' not in st.session_state: st.session_state.wl_ver = 0
 if 'mac_ver' not in st.session_state: st.session_state.mac_ver = 0
 
@@ -131,15 +131,21 @@ if 'macro_dict' not in st.session_state:
     }
 if 'macro_display_list' not in st.session_state: st.session_state.macro_display_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
 
-# 🌟 リスト更新時にバージョンを+1し、画面の記憶を強制的にリセットする
 def update_watchlist(new_list):
     st.session_state[watch_list_key] = new_list
-    st.session_state.wl_ver += 1  # UIパーツを新品に生まれ変わらせる
+    if f"watch_select_{is_us}" in st.session_state:
+        del st.session_state[f"watch_select_{is_us}"]
+    if f"t2_select_{is_us}" in st.session_state:
+        del st.session_state[f"t2_select_{is_us}"]
+        
+    st.session_state.wl_ver += 1
     save_watchlist_to_cloud(market_type_str, new_list)
     return new_list
 
 def update_macro_list(new_list):
     st.session_state.macro_display_list = new_list
+    if f"macro_select_{is_us}" in st.session_state:
+        del st.session_state[f"macro_select_{is_us}"]
     st.session_state.mac_ver += 1
     return new_list
 
@@ -524,11 +530,12 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー
+# 🎯 タブ2：個別銘柄トラッカー（スマート自動実行 ＆ 並び替え搭載）
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
 
+    # 🌟 銘柄追加フォーム
     with st.form(key=f"add_ticker_form_{is_us}", clear_on_submit=True):
         col_f1, col_f2 = st.columns([3, 1])
         with col_f1:
@@ -547,21 +554,37 @@ with tab2:
                 st.warning(f"⚠️ 「{clean_ticker}」はすでに監視リストに登録されています。")
             else:
                 watch_list.append(clean_ticker)
-                watch_list = update_watchlist(watch_list) # 🌟 ここでバージョンを+1し強制上書き
-                st.success(f"✅ 「{clean_ticker}」をリアルタイム追加しました！")
+                watch_list = update_watchlist(watch_list) 
+                st.success(f"✅ 「{clean_ticker}」を追加しました！自動でデータを取得します。")
                 time.sleep(0.5)
                 st.rerun()
 
-    # 🌟 巻き戻り防止バージョンキーを付与したリスト表示パーツ
-    selected = st.multiselect("📝 現在の監視リスト（削除や選択変更）", options=watch_list, default=watch_list, key=f"t2_select_{is_us}_{st.session_state.wl_ver}")
+    # 🌟 リストの削除
+    st.markdown("📝 **現在の監視リスト**")
+    selected = st.multiselect("「×」でリストから削除できます", options=watch_list, default=watch_list, key=f"t2_select_{is_us}_{st.session_state.wl_ver}")
     if set(selected) != set(watch_list):
         new_w_list = [m for m in watch_list if m in selected]
         for m in selected:
             if m not in new_w_list: new_w_list.append(m)
-        watch_list = update_watchlist(new_w_list) # 🌟 強制同期
+        watch_list = update_watchlist(new_w_list) 
         st.rerun()
 
-    if st.button("🎯 最新データを取得してAI判定を実行", key=f"t2_fetch_btn_{is_us}"):
+    # 🌟 新機能：ドラッグ＆ドロップ並び替えUI
+    if len(watch_list) > 1:
+        with st.expander("↕️ リストの並び替え（ドラッグ＆ドロップ）"):
+            sorted_watch = sort_items(watch_list, key=f"t2_sort_{is_us}_{st.session_state.wl_ver}")
+            if sorted_watch != watch_list:
+                watch_list = update_watchlist(sorted_watch)
+                st.rerun()
+
+    # 🌟 スマート自動実行ロジック
+    # 「最後にデータを取得した時のリスト」と「現在のリスト」が違えば自動実行！
+    if f"last_fetched_wl_{is_us}" not in st.session_state:
+        st.session_state[f"last_fetched_wl_{is_us}"] = []
+    
+    auto_fetch = (st.session_state[f"last_fetched_wl_{is_us}"] != watch_list)
+
+    if st.button("🔄 最新の株価・AI判定に更新（手動リロード）", key=f"t2_fetch_btn_{is_us}") or auto_fetch:
         with st.spinner('データを取得・計算中...'):
             st.session_state.last_tracker_data = [] 
             for sym in watch_list:
@@ -597,6 +620,9 @@ with tab2:
                         'MACD': macd_val, '週足パフォーマンス(%)': perf_w, '💡 AI判定': signal
                     })
                 except Exception as e: pass
+            
+            # 自動取得ループを防ぐため、取得したリストを「最新」として記憶
+            st.session_state[f"last_fetched_wl_{is_us}"] = list(watch_list)
 
     if st.session_state.last_tracker_data:
         for data in st.session_state.last_tracker_data:
