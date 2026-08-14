@@ -285,7 +285,7 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🌟 タブ1：全体スクリーニング（日本株特化の動的フィルター搭載）
+# 🌟 タブ1：全体スクリーニング（AI学習：長期トレンドフィルター搭載）
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
@@ -336,30 +336,32 @@ with tab1:
                 budget_target = budget_jpy
                 st.info(f"💡 予定資金: **¥{budget_target:,.0f}**")
 
-            query_cols = ['name', 'description', 'close', 'Perf.W', 'market_cap_basic', 'volume', 'RSI', 'MACD.macd', 'MACD.signal']
+            # 🌟 データ取得列に SMA200（200日移動平均線）を強制追加
+            query_cols = ['name', 'description', 'close', 'Perf.W', 'market_cap_basic', 'volume', 'RSI', 'MACD.macd', 'MACD.signal', 'SMA200']
             for ind in st.session_state.screener_indicators:
                 cols = INDICATOR_MAP[ind]["cols"]; query_cols.extend(cols)
             query_cols = list(set(query_cols))
             
-            # 🌟 日米でフィルター基準と「買える株価」の上限を最適化
             if is_us:
-                min_mcap = 10_000_000_000  # 100億ドル
-                max_mcap = 10_000_000_000_000 # 上限なし
+                min_mcap = 10_000_000_000  
+                max_mcap = 10_000_000_000_000 
                 min_vol = 2_000_000
-                max_price = budget_target  # 米国は1株から買えるので予算全額が上限
+                max_price = budget_target  
             else:
-                min_mcap = 30_000_000_000  # 日本は300億円以上（中型株も拾う）
-                max_mcap = 1_000_000_000_000  # 🌟 1兆円未満（トヨタやメガバンク等の値動きが重い超大型株を除外）
+                min_mcap = 30_000_000_000  
+                max_mcap = 1_000_000_000_000  
                 min_vol = 300_000
-                max_price = budget_target / 100  # 🌟 日本は100株単位なので、1株あたりの上限価格を算出
+                max_price = budget_target / 100  
             
+            # 🌟 今回のAI学習ポイント！ 長期トレンド（SMA200）が上向きの銘柄だけを抽出
             conditions = [
                 Column('market_cap_basic') > min_mcap,
-                Column('market_cap_basic') < max_mcap,  # 超大型除外
+                Column('market_cap_basic') < max_mcap,  
                 Column('volume') > min_vol,
                 Column('price_earnings_ttm') > 0,
                 Column('RSI') < 40,
-                Column('close') <= max_price  # 🌟 予算内で「絶対に」買える銘柄だけを抽出
+                Column('close') <= max_price,
+                Column('close') > Column('SMA200') # ← 長期トレンドが上向き（現在値が200日線を上回っている）
             ]
                 
             q = (Query().select(*query_cols).where(*conditions).order_by('market_cap_basic', ascending=False).limit(10))
@@ -391,11 +393,11 @@ with tab1:
                     if is_golden_cross:
                         conviction_title = "🔥 本気買い（フル・エントリー）"
                         alloc_pct = 1.0
-                        strategy_msg = "RSIが割安圏にある中、MACDのゴールデンクロスが確認されました。トレンド反転の確度が高いため、予定資金のフルイン（100%）を検討できる強力なチャート形状です。"
+                        strategy_msg = "長期トレンド（200日線）が上向きの中で、MACDのゴールデンクロスが確認されました。非常に勝率の高い「絶好の押し目買い」のタイミングです。"
                     else:
                         conviction_title = "💧 打診買い（テスト・エントリー）"
                         alloc_pct = 0.3
-                        strategy_msg = "RSIは売られすぎ水準ですが、MACDがまだ下落トレンドを示しています。底探りの段階のため、まずは予定資金の30%程度で入り、反発を確認してから買い増すのが安全です。"
+                        strategy_msg = "長期トレンドは上向きでRSIも割安ですが、MACDがまだ下落を示しています。底探りの段階のため、まずは予定資金の30%程度で入り、反発を確認してから買い増すのが安全です。"
 
                     # シミュレーション計算
                     alloc_target = budget_target * alloc_pct
@@ -452,7 +454,7 @@ with tab1:
                     if reasons: st.info("💡 **その他のファンダメンタル分析:**\n\n" + "\n".join([f"- {r}" for r in reasons]))
                     st.divider()
             else:
-                st.warning("現在、厳しい条件（RSI40未満、予算内の株価など）を満たす銘柄は見つかりませんでした。\n相場全体が過熱しているか、優良な押し目がない状態です。無駄なトレードを避け、資金を温存して静観を推奨します。")
+                st.warning("現在、厳しい条件（現在値が200日移動平均線を上回っている、かつRSI40未満など）を満たす銘柄は見つかりませんでした。\n相場全体が過熱しているか、長期トレンドが崩れた危険な銘柄しかない状態です。無駄なトレードを避け、資金を温存して静観を推奨します。")
 
 # ==========================================
 # タブ2＆3：トラッカー・ニュース
