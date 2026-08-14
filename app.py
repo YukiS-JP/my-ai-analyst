@@ -12,6 +12,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import email.utils
 import streamlit.components.v1 as components
+from streamlit_sortables import sort_items  # 🌟 D&D用の拡張ツールを追加
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -21,7 +22,6 @@ st.title("📊 My AI Analyst Dashboard")
 if 'watch_list' not in st.session_state:
     st.session_state.watch_list = ["SOXL", "RDW", "DNA", "FNGU"]
 
-# ユーザーが自由に追加できるマクロ指標の辞書（名前: ティッカー）
 if 'macro_dict' not in st.session_state:
     st.session_state.macro_dict = {
         "米ドル/円": "JPY=X",
@@ -33,7 +33,7 @@ if 'macro_dict' not in st.session_state:
         "ゴールド(金)": "GC=F",
         "ビットコイン": "BTC-USD"
     }
-# 実際に表示するマクロ指標のリスト（並び順）
+
 if 'macro_display_list' not in st.session_state:
     st.session_state.macro_display_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
 
@@ -85,10 +85,9 @@ def generate_reason(row):
 tab_top, tab1, tab2, tab3 = st.tabs(["🏠 トップ", "🔍 スクリーニング", "🎯 トラッカー", "📰 ニュース"])
 
 # ==========================================
-# 🌟 トップ（電光掲示板風サマリー ＆ 折りたたみチャート）
+# 🌟 トップ（電光掲示板風サマリー ＆ D&D並び替え機能）
 # ==========================================
 with tab_top:
-    # 共通の黒背景CSSデザイン
     st.markdown("""
         <style>
             .dashboard-panel {
@@ -114,14 +113,11 @@ with tab_top:
     with col1:
         st.subheader("🌍 主要市場サマリー")
     with col2:
-        # タイトル横のスマートな設定ボタン
         with st.popover("⚙️ 編集"):
-            st.markdown("**追加と並び替え**")
-            
-            # 任意のティッカー追加フォーム
-            new_macro_name = st.text_input("📝 表示名 (例: SOX指数)", placeholder="半導体指数")
-            new_macro_tick = st.text_input("🔤 ティッカー (例: ^SOX)", placeholder="^SOX")
-            if st.button("➕ この指標を追加", key="add_macro_btn"):
+            st.markdown("**1️⃣ 新しい指標の追加**")
+            new_macro_name = st.text_input("📝 表示名 (例: SOX指数)", placeholder="半導体指数", key="mac_name")
+            new_macro_tick = st.text_input("🔤 ティッカー (例: ^SOX)", placeholder="^SOX", key="mac_tick")
+            if st.button("➕ 追加する", key="add_macro_btn"):
                 if new_macro_name and new_macro_tick:
                     st.session_state.macro_dict[new_macro_name] = new_macro_tick
                     if new_macro_name not in st.session_state.macro_display_list:
@@ -129,16 +125,35 @@ with tab_top:
                     st.rerun()
             
             st.divider()
-            # 並び替えと表示のオンオフ
+            
+            st.markdown("**2️⃣ 表示する項目の選択**")
+            # 表示する項目だけを選択（削除もここで行う）
             selected_macros = st.multiselect(
-                "👁️ 表示する指標と順番",
+                "表示する指標を選んでください",
                 options=list(st.session_state.macro_dict.keys()),
                 default=st.session_state.macro_display_list,
-                key="macro_sort"
+                key="macro_select"
             )
-            if selected_macros != st.session_state.macro_display_list:
-                st.session_state.macro_display_list = selected_macros
+            
+            # リストに変更があった場合の処理
+            if set(selected_macros) != set(st.session_state.macro_display_list):
+                new_list = [m for m in st.session_state.macro_display_list if m in selected_macros]
+                for m in selected_macros:
+                    if m not in new_list:
+                        new_list.append(m)
+                st.session_state.macro_display_list = new_list
                 st.rerun()
+
+            st.divider()
+            
+            st.markdown("**3️⃣ 順番の入れ替え**")
+            st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
+            # 🌟 ここがドラッグ＆ドロップ機能
+            if st.session_state.macro_display_list:
+                sorted_macros = sort_items(st.session_state.macro_display_list, key="macro_sort")
+                if sorted_macros != st.session_state.macro_display_list:
+                    st.session_state.macro_display_list = sorted_macros
+                    st.rerun()
 
     # 黒背景パネル1（マクロ）の描画
     with st.spinner("市場データを取得中..."):
@@ -181,25 +196,42 @@ with tab_top:
         st.subheader("📌 監視銘柄 データ一覧")
     with col4:
         with st.popover("⚙️ 編集"):
-            st.markdown("**追加と並び替え**")
-            
-            new_watch_tick = st.text_input("🔤 ティッカー (例: AAPL)", placeholder="NVDA")
-            if st.button("➕ この銘柄を追加", key="add_watch_btn"):
+            st.markdown("**1️⃣ 新しい銘柄の追加**")
+            new_watch_tick = st.text_input("🔤 ティッカー (例: AAPL)", placeholder="NVDA", key="watch_tick")
+            if st.button("➕ 追加する", key="add_watch_btn"):
                 c_tick = new_watch_tick.strip().upper()
                 if c_tick and c_tick not in st.session_state.watch_list:
                     st.session_state.watch_list.append(c_tick)
                     st.rerun()
             
             st.divider()
+            
+            st.markdown("**2️⃣ 表示する銘柄の選択**")
             selected_watch = st.multiselect(
-                "👁️ 表示する銘柄と順番",
+                "表示する銘柄を選んでください",
                 options=st.session_state.watch_list,
                 default=st.session_state.watch_list,
-                key="watch_sort"
+                key="watch_select"
             )
-            if selected_watch != st.session_state.watch_list:
-                st.session_state.watch_list = selected_watch
+            
+            if set(selected_watch) != set(st.session_state.watch_list):
+                new_w_list = [m for m in st.session_state.watch_list if m in selected_watch]
+                for m in selected_watch:
+                    if m not in new_w_list:
+                        new_w_list.append(m)
+                st.session_state.watch_list = new_w_list
                 st.rerun()
+
+            st.divider()
+            
+            st.markdown("**3️⃣ 順番の入れ替え**")
+            st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
+            # 🌟 ここがドラッグ＆ドロップ機能
+            if st.session_state.watch_list:
+                sorted_watch = sort_items(st.session_state.watch_list, key="watch_sort_dd")
+                if sorted_watch != st.session_state.watch_list:
+                    st.session_state.watch_list = sorted_watch
+                    st.rerun()
 
     # 黒背景パネル2（銘柄）の描画
     with st.spinner("銘柄データを取得中..."):
@@ -336,11 +368,11 @@ with tab2:
     
     col1, col2 = st.columns([3, 1])
     with col1:
-        new_ticker = st.text_input("➕ 新しい銘柄を追加", placeholder="例: NVDA")
+        new_ticker = st.text_input("➕ 新しい銘柄を追加", placeholder="例: NVDA", key="t2_add")
     with col2:
         st.write("") 
         st.write("")
-        if st.button("追加する"):
+        if st.button("追加する", key="t2_add_btn"):
             clean_ticker = new_ticker.strip().upper()
             if clean_ticker and clean_ticker not in st.session_state.watch_list:
                 st.session_state.watch_list.append(clean_ticker)
@@ -349,7 +381,8 @@ with tab2:
     selected = st.multiselect(
         "📝 現在の監視リスト",
         options=st.session_state.watch_list,
-        default=st.session_state.watch_list
+        default=st.session_state.watch_list,
+        key="t2_select"
     )
     
     if selected != st.session_state.watch_list:
