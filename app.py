@@ -68,91 +68,126 @@ def generate_reason(row):
 tab_top, tab1, tab2, tab3 = st.tabs(["🏠 トップ", "🔍 スクリーニング", "🎯 トラッカー", "📰 ニュース"])
 
 # ==========================================
-# 🌟 トップ（チャート ＆ 重要指標ダッシュボード）
+# 🌟 トップ（市場全体サマリー ＆ 監視銘柄数値一覧 ＆ 折りたたみチャート）
 # ==========================================
 with tab_top:
-    st.write("気になる銘柄のリアルタイムチャートと重要指標を配置できるダッシュボードです。")
+    st.subheader("🌐 主要市場サマリー（為替・全体指数）")
+    
+    # 🚀 マクロ市場指標の取得（ドル円、S&P500、NASDAQ、日経平均）
+    macro_tickers = {
+        "米ドル/円": "JPY=X",
+        "S&P 500": "^GSPC",
+        "NASDAQ": "^IXIC",
+        "日経平均": "^N225"
+    }
+    
+    macro_cols = st.columns(len(macro_tickers))
+    
+    for idx, (name, symbol) in enumerate(macro_tickers.items()):
+        try:
+            t = yf.Ticker(symbol)
+            h = t.history(period="5d")
+            if not h.empty and len(h) >= 2:
+                c_price = h['Close'].iloc[-1]
+                p_price = h['Close'].iloc[-2]
+                diff = c_price - p_price
+                pct = (diff / p_price) * 100
+                
+                if symbol == "JPY=X":
+                    val_str = f"¥{c_price:.2f}"
+                    diff_str = f"{diff:+.2f} ({pct:+.2f}%)"
+                else:
+                    val_str = f"{c_price:,.2f}"
+                    diff_str = f"{diff:+,.2f} ({pct:+.2f}%)"
+                    
+                macro_cols[idx].metric(name, val_str, diff_str)
+            else:
+                macro_cols[idx].metric(name, "取得失敗", "")
+        except Exception:
+            macro_cols[idx].metric(name, "エラー", "")
+
+    st.divider()
+    
+    st.subheader("📌 監視銘柄 データ一覧 ＆ チャート")
     
     selected_charts = st.multiselect(
-        "📈 トップに表示する銘柄を選択（※選んだ順番に並びます）",
+        "表示する銘柄を選択（※並び順も自由に変更可能です）",
         options=st.session_state.watch_list,
-        default=st.session_state.watch_list[:2] if len(st.session_state.watch_list) >= 2 else st.session_state.watch_list
+        default=st.session_state.watch_list
     )
     
     st.write("") 
     
     if selected_charts:
         for sym in selected_charts:
-            st.markdown(f"### 📌 {sym} の市況")
+            st.markdown(f"### 🔹 {sym}")
             
-            # 🚀 チャートの上に「パッと見」で役立つ4つの指標を取得して並べる
-            with st.spinner(f'{sym} の最新データを読み込み中...'):
-                try:
-                    ticker = yf.Ticker(sym)
-                    hist = ticker.history(period="1y") # 52週高値計算のために1年分取得
+            # 🚀 数値指標データの表示
+            try:
+                ticker = yf.Ticker(sym)
+                hist = ticker.history(period="1y")
+                
+                if not hist.empty and len(hist) > 22:
+                    curr_p = hist['Close'].iloc[-1]
+                    prev_p = hist['Close'].iloc[-2]
+                    day_diff = curr_p - prev_p
+                    day_pct = (day_diff / prev_p) * 100
+
+                    month_p = hist['Close'].iloc[-22]
+                    month_pct = ((curr_p - month_p) / month_p) * 100
+
+                    high_52 = hist['High'].max()
+                    dd_52 = ((curr_p - high_52) / high_52) * 100
+
+                    delta = hist['Close'].diff()
+                    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                    rs = gain / loss
+                    rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                     
-                    if not hist.empty and len(hist) > 22:
-                        curr_p = hist['Close'].iloc[-1]
-                        prev_p = hist['Close'].iloc[-2]
-                        day_diff = curr_p - prev_p
-                        day_pct = (day_diff / prev_p) * 100
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("現在値 (前日比)", f"${curr_p:.2f}", f"{day_diff:+.2f} ({day_pct:+.2f}%)")
+                    col2.metric("前月比", f"${curr_p:.2f}", f"{month_pct:+.2f}%")
+                    
+                    if rsi_val >= 70:
+                        rsi_stat = "🔴 過熱"
+                    elif rsi_val <= 45:
+                        rsi_stat = "🟢 割安"
+                    else:
+                        rsi_stat = "⚪️ 中立"
+                    col3.metric("日足RSI", f"{rsi_val:.1f}", rsi_stat, delta_color="off")
+                    col4.metric("52週高値差", f"${high_52:.2f}", f"{dd_52:+.1f}%")
+            except Exception:
+                st.warning(f"⚠️ {sym} の指標データ取得に失敗しました。")
 
-                        month_p = hist['Close'].iloc[-22] # 約1ヶ月（22営業日）前
-                        month_pct = ((curr_p - month_p) / month_p) * 100
-
-                        high_52 = hist['High'].max()
-                        dd_52 = ((curr_p - high_52) / high_52) * 100
-
-                        delta = hist['Close'].diff()
-                        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-                        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-                        rs = gain / loss
-                        rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
-                        
-                        # 指標を4列に並べて美しく表示
-                        col1, col2, col3, col4 = st.columns(4)
-                        col1.metric("現在値 (前日比)", f"${curr_p:.2f}", f"{day_diff:+.2f} ({day_pct:+.2f}%)")
-                        col2.metric("前月比 (中期トレンド)", f"${curr_p:.2f}", f"{month_pct:+.2f}%")
-                        
-                        # RSIの数値によってテキストを変化させる
-                        if rsi_val >= 70:
-                            rsi_stat = "🔴 過熱（警戒）"
-                        elif rsi_val <= 45:
-                            rsi_stat = "🟢 割安（チャンス）"
-                        else:
-                            rsi_stat = "⚪️ 中立"
-                        col3.metric("現在の日足RSI", f"{rsi_val:.1f}", rsi_stat, delta_color="off")
-                        
-                        col4.metric("52週高値からの距離", f"${high_52:.2f} (高値)", f"{dd_52:+.1f}%")
-                except Exception:
-                    st.warning(f"⚠️ {sym} の指標データの取得に失敗しました。")
-
-            # TradingViewウィジェット
-            html_code = f"""
-            <div class="tradingview-widget-container">
-              <div id="tradingview_{sym}"></div>
-              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-              <script type="text/javascript">
-              new TradingView.widget(
-              {{
-              "width": "100%",
-              "height": 400,
-              "symbol": "{sym}",
-              "interval": "D",
-              "timezone": "Asia/Tokyo",
-              "theme": "dark",
-              "style": "1",
-              "locale": "ja",
-              "enable_publishing": false,
-              "allow_symbol_change": true,
-              "hide_top_toolbar": false,
-              "container_id": "tradingview_{sym}"
-            }}
-              );
-              </script>
-            </div>
-            """
-            components.html(html_code, height=400)
+            # 📈 折りたたみ式TradingViewチャート（タップでスッと開く）
+            with st.expander(f"📈 {sym} の詳細チャートを開く / 閉じる"):
+                html_code = f"""
+                <div class="tradingview-widget-container">
+                  <div id="tradingview_{sym}"></div>
+                  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                  <script type="text/javascript">
+                  new TradingView.widget(
+                  {{
+                  "width": "100%",
+                  "height": 400,
+                  "symbol": "{sym}",
+                  "interval": "D",
+                  "timezone": "Asia/Tokyo",
+                  "theme": "dark",
+                  "style": "1",
+                  "locale": "ja",
+                  "enable_publishing": false,
+                  "allow_symbol_change": true,
+                  "hide_top_toolbar": false,
+                  "container_id": "tradingview_{sym}"
+                }}
+                  );
+                  </script>
+                </div>
+                """
+                components.html(html_code, height=400)
+            
             st.divider()
     else:
         st.info("上のメニューから、表示させたい銘柄を選んでください。")
