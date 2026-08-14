@@ -55,7 +55,7 @@ is_us = (market_mode == "🇺🇸 米国市場 (US)")
 
 curr_sym = "$" if is_us else "¥"
 market_name_tv = 'america' if is_us else 'japan'
-ticker_suffix_hint = "" if is_us else " (例: 7203.T)"
+ticker_suffix_hint = "" if is_us else " (例: 7203 または 7203.T)"
 
 # --- セッションステート初期化 ---
 if 'watch_list_us' not in st.session_state: st.session_state.watch_list_us = ["SOXL", "RDW", "DNA", "FNGU"]
@@ -141,14 +141,16 @@ with tab_top:
 
     with st.expander(f"💼 {market_mode.split(' ')[0]} ポートフォリオの編集"):
         c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-        with c1: p_tick = st.text_input(f"ティッカー{ticker_suffix_hint}", key=f"p_tick_{is_us}")
+        with c1: p_tick_raw = st.text_input(f"ティッカー{ticker_suffix_hint}", key=f"p_tick_{is_us}")
         with c2: p_price = st.number_input(f"平均取得単価 ({curr_sym})", min_value=0.0, step=0.1 if is_us else 1.0, format="%.2f", key=f"p_price_{is_us}")
         with c3: p_qty = st.number_input("保有数量 (株)", min_value=0.0, step=1.0, format="%.2f", key=f"p_qty_{is_us}")
         with c4:
             st.write(""); st.write("")
             if st.button("登録", key=f"p_add_{is_us}"):
-                if p_tick and p_qty > 0:
-                    st.session_state[portfolio_key][p_tick.strip().upper()] = {'avg_price': p_price, 'qty': p_qty}; st.rerun()
+                if p_tick_raw and p_qty > 0:
+                    pt = p_tick_raw.strip().upper()
+                    if not is_us and pt.isdigit(): pt += ".T"
+                    st.session_state[portfolio_key][pt] = {'avg_price': p_price, 'qty': p_qty}; st.rerun()
         st.divider()
         if portfolio:
             for t in list(portfolio.keys()):
@@ -237,9 +239,10 @@ with tab_top:
         with col3: st.subheader(f"📌 {market_mode.split(' ')[0]} 監視銘柄 データ一覧")
         with col4:
             with st.popover("⚙️ 編集"):
-                new_watch_tick = st.text_input(f"🔤 ティッカー{ticker_suffix_hint}", key=f"watch_tick_{is_us}")
+                new_watch_tick_raw = st.text_input(f"🔤 ティッカー{ticker_suffix_hint}", key=f"watch_tick_{is_us}")
                 if st.button("➕ 追加", key=f"add_watch_btn_{is_us}"):
-                    c_tick = new_watch_tick.strip().upper()
+                    c_tick = new_watch_tick_raw.strip().upper()
+                    if not is_us and c_tick.isdigit(): c_tick += ".T"
                     if c_tick and c_tick not in watch_list: st.session_state[watch_list_key].append(c_tick); st.rerun()
                 st.divider()
                 selected_watch = st.multiselect("表示", options=watch_list, default=watch_list, key=f"watch_select_{is_us}")
@@ -295,7 +298,7 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🔍 タブ1：全体スクリーニング（下落トレンド完全排除フィルター搭載）
+# 🔍 タブ1：全体スクリーニング
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
@@ -333,7 +336,6 @@ with tab1:
                 budget_target = budget_jpy
                 st.info(f"💡 予定資金: **¥{budget_target:,.0f}**")
 
-            # 🌟 50日線（SMA50）と200日線（SMA200）を強制取得
             query_cols = ['name', 'description', 'close', 'Perf.W', 'market_cap_basic', 'volume', 'RSI', 'MACD.macd', 'MACD.signal', 'SMA50', 'SMA200']
             for ind in st.session_state.screener_indicators:
                 cols = INDICATOR_MAP[ind]["cols"]; query_cols.extend(cols)
@@ -344,13 +346,10 @@ with tab1:
             else:
                 min_mcap = 30_000_000_000; max_mcap = 1_000_000_000_000; min_vol = 300_000; max_price = budget_target / 100  
             
-            # 🌟 下落トレンド完全シャットアウト：現在値が50日線・200日線の両方を上回っていること
             conditions = [
                 Column('market_cap_basic') > min_mcap, Column('market_cap_basic') < max_mcap,  
                 Column('volume') > min_vol, Column('price_earnings_ttm') > 0, Column('RSI') < 40,
-                Column('close') <= max_price, 
-                Column('close') > Column('SMA200'),
-                Column('close') > Column('SMA50') # ← 🌟 追加！50日線より下にある下落トレンド銘柄を完全に排除
+                Column('close') <= max_price, Column('close') > Column('SMA200'), Column('close') > Column('SMA50')
             ]
                 
             q = (Query().select(*query_cols).where(*conditions).order_by('market_cap_basic', ascending=False).limit(10))
@@ -424,7 +423,7 @@ with tab1:
                     st.markdown(f"- **取得データ:** " + " ｜ ".join(metrics_strs))
                     st.divider()
             else:
-                st.warning("現在、厳しい条件（50日線・200日線の上、RSI40未満など）を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
+                st.warning("現在、厳しい条件を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
 
     if st.session_state.last_screened_data:
         st.write("")
@@ -454,11 +453,12 @@ with tab1:
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
     col1, col2 = st.columns([3, 1])
-    with col1: new_ticker = st.text_input(f"➕ 新しい銘柄を追加{ticker_suffix_hint}", key=f"t2_add_{is_us}")
+    with col1: new_ticker_raw = st.text_input(f"➕ 新しい銘柄を追加{ticker_suffix_hint}", key=f"t2_add_{is_us}")
     with col2:
         st.write(""); st.write("")
         if st.button("追加する", key=f"t2_add_btn_{is_us}"):
-            clean_ticker = new_ticker.strip().upper()
+            clean_ticker = new_ticker_raw.strip().upper()
+            if not is_us and clean_ticker.isdigit(): clean_ticker += ".T"
             if clean_ticker and clean_ticker not in watch_list:
                 st.session_state[watch_list_key].append(clean_ticker); st.rerun() 
     selected = st.multiselect("📝 現在の監視リスト", options=watch_list, default=watch_list, key=f"t2_select_{is_us}")
