@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 import email.utils
 import streamlit.components.v1 as components
 from streamlit_sortables import sort_items
+from deep_translator import GoogleTranslator  # 🌟 翻訳ツールを追加
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
@@ -24,7 +25,7 @@ st.title("📊 My AI Analyst Dashboard")
 market_mode = st.radio(
     "🌍 分析する市場を切り替え",
     ["🇺🇸 米国市場 (US)", "🇯🇵 日本市場 (JP)"],
-    horizontal=True # スマホで横並びにする設定
+    horizontal=True 
 )
 is_us = (market_mode == "🇺🇸 米国市場 (US)")
 
@@ -38,7 +39,7 @@ if 'watch_list_us' not in st.session_state: st.session_state.watch_list_us = ["S
 if 'watch_list_jp' not in st.session_state: st.session_state.watch_list_jp = ["7203.T", "1959.T", "8035.T", "9984.T"]
 if 'portfolio_us' not in st.session_state: st.session_state.portfolio_us = {}
 if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = {}
-if 'company_names' not in st.session_state: st.session_state.company_names = {} # 企業名キャッシュ
+if 'company_names' not in st.session_state: st.session_state.company_names = {} 
 
 watch_list_key = 'watch_list_us' if is_us else 'watch_list_jp'
 portfolio_key = 'portfolio_us' if is_us else 'portfolio_jp'
@@ -64,15 +65,19 @@ INDICATOR_MAP = {
     "配当利回り(%)": {"cols": ["dividend_yield_recent"]}
 }
 
-# 🌟 企業名を自動取得する関数（日本株用）
+# 🌟 企業名を自動取得＆日本語翻訳する関数
 def get_company_name(sym):
     if is_us: return sym
     if sym in st.session_state.company_names: return f"{sym} {st.session_state.company_names[sym]}"
     try:
         info = yf.Ticker(sym).info
-        name = info.get('shortName') or info.get('longName') or ""
-        st.session_state.company_names[sym] = name
-        return f"{sym} {name}" if name else sym
+        name_en = info.get('shortName') or info.get('longName') or ""
+        if name_en:
+            # 取得した英語名を日本語に翻訳
+            name_ja = GoogleTranslator(source='en', target='ja').translate(name_en)
+            st.session_state.company_names[sym] = name_ja
+            return f"{sym} {name_ja}"
+        return sym
     except:
         return sym
 
@@ -103,7 +108,7 @@ with tab_top:
     """, unsafe_allow_html=True)
 
     with st.expander(f"💼 {market_mode.split(' ')[0]} ポートフォリオの編集（保有銘柄の登録・削除）"):
-        st.markdown(f"**1️⃣ 保有銘柄の登録・更新**")
+        st.markdown(f"**1️⃣ 保今銘柄の登録・更新**")
         c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
         with c1: p_tick = st.text_input(f"ティッカー{ticker_suffix_hint}", key="p_tick")
         with c2: p_price = st.number_input(f"平均取得単価 ({curr_sym})", min_value=0.0, step=0.1 if is_us else 1.0, format="%.2f", key="p_price")
@@ -281,7 +286,7 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🌟 タブ1：全体スクリーニング（日米ハイブリッド ＆ 企業名取得 搭載）
+# 🌟 タブ1：全体スクリーニング（日本語翻訳搭載）
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
@@ -328,21 +333,19 @@ with tab1:
                 budget_target = budget_jpy
                 st.info(f"💡 予定資金: **¥{budget_target:,.0f}**")
 
-            # description(企業名) も一緒に取得する
             query_cols = ['name', 'description', 'close', 'Perf.W', 'market_cap_basic', 'volume', 'RSI', 'MACD.macd', 'MACD.signal']
             for ind in st.session_state.screener_indicators:
                 cols = INDICATOR_MAP[ind]["cols"]; query_cols.extend(cols)
             query_cols = list(set(query_cols))
             
-            # 🌟 日米でフィルター基準を最適化
-            min_mcap = 10_000_000_000 if is_us else 100_000_000_000 # US:100億ドル / JP:1000億円(優良大型)
-            min_vol = 2_000_000 if is_us else 500_000 # JPは50万株以上で十分流動性あり
+            min_mcap = 10_000_000_000 if is_us else 100_000_000_000 
+            min_vol = 2_000_000 if is_us else 500_000 
             
             conditions = [
                 Column('market_cap_basic') > min_mcap,
                 Column('volume') > min_vol,
                 Column('price_earnings_ttm') > 0,
-                Column('RSI') < 40  # スイング用 強い売られすぎ
+                Column('RSI') < 40  
             ]
                 
             q = (Query().select(*query_cols).where(*conditions).order_by('market_cap_basic', ascending=False).limit(10))
@@ -354,12 +357,18 @@ with tab1:
                 st.success(f"🎯 厳格なスクリーニングを通過した銘柄です！")
                 
                 for index, row in df.iterrows():
-                    # 企業名の整形処理
-                    if is_us: sym_name = row['name']
+                    # 🌟 企業名を翻訳して整形
+                    if is_us: 
+                        sym_name = row['name']
                     else:
                         raw_name = row['name']
-                        desc = row.get('description', '')
-                        sym_name = f"{raw_name}.T {desc}"
+                        desc_en = row.get('description', '')
+                        try:
+                            # 英語の企業名を日本語に翻訳
+                            desc_ja = GoogleTranslator(source='en', target='ja').translate(desc_en)
+                        except:
+                            desc_ja = desc_en
+                        sym_name = f"{raw_name}.T {desc_ja}"
                         
                     curr_price = row.get('close', 1)
                     st.markdown(f"### 📌 {sym_name} (現在値: {curr_sym}{curr_price:,.2f})")
@@ -381,7 +390,7 @@ with tab1:
                     if is_us: shares_to_buy = int(alloc_target / curr_price)
                     else:
                         shares_to_buy = int((alloc_target / curr_price) // 100) * 100
-                        if shares_to_buy == 0: shares_to_buy = 100 # 日本株は最低100株単位
+                        if shares_to_buy == 0: shares_to_buy = 100 
                         
                     actual_cost = shares_to_buy * curr_price
                     actual_cost_jpy = actual_cost * usd_jpy if is_us else actual_cost
@@ -506,11 +515,26 @@ with tab3:
     if watch_list:
         if st.button("📰 監視リストの最新ニュースを一括取得"):
             with st.spinner('全銘柄のニュースを検索中...'):
+                def display_news_item(item):
+                    title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
+                    link = item.find('link').text if item.find('link') is not None else '#'
+                    source_elem = item.find('source')
+                    publisher = source_elem.text if source_elem is not None else '配信元不明'
+                    pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
+                    dt = "時刻不明"
+                    if pub_date_str:
+                        time_tuple = email.utils.parsedate_tz(pub_date_str)
+                        if time_tuple:
+                            timestamp = email.utils.mktime_tz(time_tuple)
+                            dt_obj = datetime.utcfromtimestamp(timestamp) + timedelta(hours=9)
+                            dt = dt_obj.strftime('%Y/%m/%d %H:%M')
+                    st.markdown(f"**[{title}]({link})**")
+                    st.caption(f"🏢 {publisher}  |  🕒 {dt}")
+
                 for sym in watch_list:
                     disp_name = get_company_name(sym)
                     st.markdown(f"### 📌 {disp_name} のニュース")
                     try:
-                        # ニュース検索は「ティッカー名 または 企業名」で検索
                         search_q = sym.replace('.T', '') if is_us else disp_name.split(' ')[-1]
                         url = f"https://news.google.com/rss/search?q={urllib.parse.quote(search_q)}+stock&hl=ja&gl=JP&ceid=JP:ja"
                         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
