@@ -11,10 +11,15 @@ from datetime import datetime, timedelta
 import urllib.request
 import xml.etree.ElementTree as ET
 import email.utils
+import streamlit.components.v1 as components  # 🌟 ウィジェット埋め込み用に追加
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
 st.title("📊 My AI Analyst Dashboard")
+
+# 🌟 全タブで共通して使う「監視リスト」の初期設定を一番上に移動
+if 'watch_list' not in st.session_state:
+    st.session_state.watch_list = ["SOXL", "RDW", "DNA", "FNGU"]
 
 # ------------------------------------------------
 # AIによる「ステータス判定・選定理由」を生成する関数
@@ -59,9 +64,57 @@ def generate_reason(row):
 
 
 # ------------------------------------------------
-# アプリ画面の構築（タブで3画面に分割）
+# アプリ画面の構築（タブで4画面に分割）
 # ------------------------------------------------
-tab1, tab2, tab3 = st.tabs(["🔍 全体スクリーニング", "🎯 個別銘柄トラッカー", "📰 最新ニュース"])
+tab_top, tab1, tab2, tab3 = st.tabs(["🏠 トップ", "🔍 スクリーニング", "🎯 トラッカー", "📰 ニュース"])
+
+# ==========================================
+# 🌟 新タブ：トップ（チャートダッシュボード）
+# ==========================================
+with tab_top:
+    st.write("気になる銘柄のリアルタイムチャートを配置できるダッシュボードです。")
+    
+    # 選択した順番にチャートが並ぶマルチセレクト
+    selected_charts = st.multiselect(
+        "📈 トップに表示するチャートを選択（※選んだ順番に並びます）",
+        options=st.session_state.watch_list,
+        default=st.session_state.watch_list[:2] if len(st.session_state.watch_list) >= 2 else st.session_state.watch_list
+    )
+    
+    st.write("") # 少し余白
+    
+    if selected_charts:
+        for sym in selected_charts:
+            st.markdown(f"### 📌 {sym} のチャート")
+            # TradingViewウィジェットのHTMLコード
+            html_code = f"""
+            <div class="tradingview-widget-container">
+              <div id="tradingview_{sym}"></div>
+              <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+              <script type="text/javascript">
+              new TradingView.widget(
+              {{
+              "width": "100%",
+              "height": 400,
+              "symbol": "{sym}",
+              "interval": "D",
+              "timezone": "Asia/Tokyo",
+              "theme": "dark",
+              "style": "1",
+              "locale": "ja",
+              "enable_publishing": false,
+              "allow_symbol_change": true,
+              "hide_top_toolbar": false,
+              "container_id": "tradingview_{sym}"
+            }}
+              );
+              </script>
+            </div>
+            """
+            components.html(html_code, height=400)
+            st.divider()
+    else:
+        st.info("上のメニューから、表示させたい銘柄を選んでください。")
 
 # ==========================================
 # タブ1：全体スクリーニング
@@ -109,9 +162,6 @@ with tab1:
 with tab2:
     st.write("監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに自動記録**します。")
     
-    if 'watch_list' not in st.session_state:
-        st.session_state.watch_list = ["SOXL", "RDW", "DNA", "FNGU"]
-
     col1, col2 = st.columns([3, 1])
     with col1:
         new_ticker = st.text_input("➕ 新しい銘柄を追加", placeholder="例: NVDA")
@@ -254,7 +304,6 @@ with tab3:
         if st.button("📰 監視リストの最新ニュースを一括取得"):
             with st.spinner('全銘柄のニュースを検索中...'):
                 
-                # ニュースを表示するための共通関数
                 def display_news_item(item):
                     title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
                     link = item.find('link').text if item.find('link') is not None else '#'
@@ -286,22 +335,19 @@ with tab3:
                         items = root.findall('.//item')
                         
                         if items:
-                            # 最初の3件は常に表示
                             for item in items[:3]:
                                 display_news_item(item)
                             
-                            # 4件目以降がある場合は「もっと見る」の中に格納（最大10件まで）
                             if len(items) > 3:
                                 with st.expander(f"🔽 {news_target} のその他のニュースを見る"):
                                     for item in items[3:10]:
                                         display_news_item(item)
-                                        st.write("") # 少し余白をあける
+                                        st.write("") 
                         else:
                             st.info(f"{news_target} に関連する最新ニュースは見つかりませんでした。")
                     except Exception as e:
                         st.error(f"{news_target} のニュース取得中にエラーが発生しました。")
                     
-                    # 銘柄ごとの区切り線
                     st.divider()
     else:
         st.info("タブ2（個別銘柄トラッカー）で監視リストに銘柄を追加してください。")
