@@ -11,13 +11,12 @@ from datetime import datetime, timedelta
 import urllib.request
 import xml.etree.ElementTree as ET
 import email.utils
-import streamlit.components.v1 as components  # 🌟 ウィジェット埋め込み用に追加
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
 st.title("📊 My AI Analyst Dashboard")
 
-# 🌟 全タブで共通して使う「監視リスト」の初期設定を一番上に移動
 if 'watch_list' not in st.session_state:
     st.session_state.watch_list = ["SOXL", "RDW", "DNA", "FNGU"]
 
@@ -69,24 +68,66 @@ def generate_reason(row):
 tab_top, tab1, tab2, tab3 = st.tabs(["🏠 トップ", "🔍 スクリーニング", "🎯 トラッカー", "📰 ニュース"])
 
 # ==========================================
-# 🌟 新タブ：トップ（チャートダッシュボード）
+# 🌟 トップ（チャート ＆ 重要指標ダッシュボード）
 # ==========================================
 with tab_top:
-    st.write("気になる銘柄のリアルタイムチャートを配置できるダッシュボードです。")
+    st.write("気になる銘柄のリアルタイムチャートと重要指標を配置できるダッシュボードです。")
     
-    # 選択した順番にチャートが並ぶマルチセレクト
     selected_charts = st.multiselect(
-        "📈 トップに表示するチャートを選択（※選んだ順番に並びます）",
+        "📈 トップに表示する銘柄を選択（※選んだ順番に並びます）",
         options=st.session_state.watch_list,
         default=st.session_state.watch_list[:2] if len(st.session_state.watch_list) >= 2 else st.session_state.watch_list
     )
     
-    st.write("") # 少し余白
+    st.write("") 
     
     if selected_charts:
         for sym in selected_charts:
-            st.markdown(f"### 📌 {sym} のチャート")
-            # TradingViewウィジェットのHTMLコード
+            st.markdown(f"### 📌 {sym} の市況")
+            
+            # 🚀 チャートの上に「パッと見」で役立つ4つの指標を取得して並べる
+            with st.spinner(f'{sym} の最新データを読み込み中...'):
+                try:
+                    ticker = yf.Ticker(sym)
+                    hist = ticker.history(period="1y") # 52週高値計算のために1年分取得
+                    
+                    if not hist.empty and len(hist) > 22:
+                        curr_p = hist['Close'].iloc[-1]
+                        prev_p = hist['Close'].iloc[-2]
+                        day_diff = curr_p - prev_p
+                        day_pct = (day_diff / prev_p) * 100
+
+                        month_p = hist['Close'].iloc[-22] # 約1ヶ月（22営業日）前
+                        month_pct = ((curr_p - month_p) / month_p) * 100
+
+                        high_52 = hist['High'].max()
+                        dd_52 = ((curr_p - high_52) / high_52) * 100
+
+                        delta = hist['Close'].diff()
+                        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                        rs = gain / loss
+                        rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
+                        
+                        # 指標を4列に並べて美しく表示
+                        col1, col2, col3, col4 = st.columns(4)
+                        col1.metric("現在値 (前日比)", f"${curr_p:.2f}", f"{day_diff:+.2f} ({day_pct:+.2f}%)")
+                        col2.metric("前月比 (中期トレンド)", f"${curr_p:.2f}", f"{month_pct:+.2f}%")
+                        
+                        # RSIの数値によってテキストを変化させる
+                        if rsi_val >= 70:
+                            rsi_stat = "🔴 過熱（警戒）"
+                        elif rsi_val <= 45:
+                            rsi_stat = "🟢 割安（チャンス）"
+                        else:
+                            rsi_stat = "⚪️ 中立"
+                        col3.metric("現在の日足RSI", f"{rsi_val:.1f}", rsi_stat, delta_color="off")
+                        
+                        col4.metric("52週高値からの距離", f"${high_52:.2f} (高値)", f"{dd_52:+.1f}%")
+                except Exception:
+                    st.warning(f"⚠️ {sym} の指標データの取得に失敗しました。")
+
+            # TradingViewウィジェット
             html_code = f"""
             <div class="tradingview-widget-container">
               <div id="tradingview_{sym}"></div>
@@ -295,7 +336,7 @@ with tab2:
                     st.divider()
 
 # ==========================================
-# タブ3：最新ニュース（折りたたみ「もっと見る」機能付き）
+# タブ3：最新ニュース
 # ==========================================
 with tab3:
     st.write("監視中の**全銘柄**に関連する最新ニュースを一覧でチェックできます。")
