@@ -34,7 +34,7 @@ def check_already_saved(market_mode, current_date, sheet_type="screener"):
             return False
             
         all_values = ws.get_all_values()
-        norm_current_date = current_date.replace('-', '/') # 日付フォーマットのズレを吸収
+        norm_current_date = current_date.replace('-', '/')
         
         for row in reversed(all_values):
             if len(row) >= 2:
@@ -295,7 +295,7 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🔍 タブ1：全体スクリーニング（端末間同期・結果保持対応）
+# 🔍 タブ1：全体スクリーニング（下落トレンド完全排除フィルター搭載）
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
@@ -333,7 +333,8 @@ with tab1:
                 budget_target = budget_jpy
                 st.info(f"💡 予定資金: **¥{budget_target:,.0f}**")
 
-            query_cols = ['name', 'description', 'close', 'Perf.W', 'market_cap_basic', 'volume', 'RSI', 'MACD.macd', 'MACD.signal', 'SMA200']
+            # 🌟 50日線（SMA50）と200日線（SMA200）を強制取得
+            query_cols = ['name', 'description', 'close', 'Perf.W', 'market_cap_basic', 'volume', 'RSI', 'MACD.macd', 'MACD.signal', 'SMA50', 'SMA200']
             for ind in st.session_state.screener_indicators:
                 cols = INDICATOR_MAP[ind]["cols"]; query_cols.extend(cols)
             query_cols = list(set(query_cols))
@@ -343,10 +344,13 @@ with tab1:
             else:
                 min_mcap = 30_000_000_000; max_mcap = 1_000_000_000_000; min_vol = 300_000; max_price = budget_target / 100  
             
+            # 🌟 下落トレンド完全シャットアウト：現在値が50日線・200日線の両方を上回っていること
             conditions = [
                 Column('market_cap_basic') > min_mcap, Column('market_cap_basic') < max_mcap,  
                 Column('volume') > min_vol, Column('price_earnings_ttm') > 0, Column('RSI') < 40,
-                Column('close') <= max_price, Column('close') > Column('SMA200')
+                Column('close') <= max_price, 
+                Column('close') > Column('SMA200'),
+                Column('close') > Column('SMA50') # ← 🌟 追加！50日線より下にある下落トレンド銘柄を完全に排除
             ]
                 
             q = (Query().select(*query_cols).where(*conditions).order_by('market_cap_basic', ascending=False).limit(10))
@@ -372,10 +376,10 @@ with tab1:
                         
                     if is_golden_cross:
                         conv_type = "本気買い"; conviction_title = "🔥 本気買い（フル・エントリー）"; alloc_pct = 1.0
-                        strategy_msg = "長期トレンド（200日線）が上向きの中で、MACDのゴールデンクロスが確認されました。絶好の押し目買いのタイミングです。"
+                        strategy_msg = "中長期トレンド（50日線・200日線）が上向きの中で、MACDのゴールデンクロスが確認されました。絶好の押し目買いのタイミングです。"
                     else:
                         conv_type = "打診買い"; conviction_title = "💧 打診買い（テスト・エントリー）"; alloc_pct = 0.3
-                        strategy_msg = "長期トレンドは上向きでRSIも割安ですが、MACDがまだ下落を示しています。底探りの段階です。"
+                        strategy_msg = "中長期トレンドは上向きでRSIも割安ですが、MACDがまだ下落を示しています。底探りの段階です。"
 
                     alloc_target = budget_target * alloc_pct
                     if is_us: shares_to_buy = int(alloc_target / curr_price)
@@ -420,9 +424,8 @@ with tab1:
                     st.markdown(f"- **取得データ:** " + " ｜ ".join(metrics_strs))
                     st.divider()
             else:
-                st.warning("現在、厳しい条件を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
+                st.warning("現在、厳しい条件（50日線・200日線の上、RSI40未満など）を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
 
-    # 🌟 検索結果がセッションに残っている場合、またはクラウドで未保存の場合に表示
     if st.session_state.last_screened_data:
         st.write("")
         if check_already_saved(market_mode, current_market_date, sheet_type="screener"):
@@ -441,13 +444,12 @@ with tab1:
                             ws.append_row(["取得日付", "市場", "ティッカー", "現在値", "判定", "推奨購入株数", "RSI", "MACD"])
 
                         for row in st.session_state.last_screened_data: ws.append_row(row)
-                        # 🌟 保存後もデータは消さず、クラウド判定によって「保存済み」メッセージに切り替える
                         st.success("✅ スプレッドシートの「スクリーニング履歴」タブに保存しました！")
                         time.sleep(1.5); st.rerun() 
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー（端末間同期・結果保持対応）
+# 🎯 タブ2：個別銘柄トラッカー
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
