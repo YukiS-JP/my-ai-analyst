@@ -87,14 +87,72 @@ def save_watchlist_to_cloud(market_type, watch_list):
             new_rows.append([market_type, sym])
             
         ws.clear()
-        ws.update(new_rows)
+        if new_rows:
+            ws.update(new_rows)
     except Exception as e:
         st.error(f"監視リストのクラウド同期エラー: {e}")
 
+# 🌟 ポートフォリオのクラウド管理機能
+def load_portfolio_from_cloud(market_type):
+    try:
+        client = get_cloud_client()
+        sheet = client.open_by_url(SHEET_URL)
+        try:
+            ws = sheet.worksheet("設定_ポートフォリオ")
+        except:
+            ws = sheet.add_worksheet(title="設定_ポートフォリオ", rows="100", cols="5")
+            ws.append_row(["市場", "ティッカー", "取得単価", "数量"])
+            return {}
+            
+        vals = ws.get_all_values()
+        port = {}
+        for row in vals[1:]:
+            if len(row) >= 4 and row[0] == market_type:
+                port[row[1]] = {'avg_price': float(row[2]), 'qty': float(row[3])}
+        return port
+    except:
+        return {}
+
+def save_portfolio_to_cloud(market_type, port_dict):
+    try:
+        client = get_cloud_client()
+        sheet = client.open_by_url(SHEET_URL)
+        try:
+            ws = sheet.worksheet("設定_ポートフォリオ")
+        except:
+            ws = sheet.add_worksheet(title="設定_ポートフォリオ", rows="100", cols="5")
+            ws.append_row(["市場", "ティッカー", "取得単価", "数量"])
+            
+        vals = ws.get_all_values()
+        new_rows = [row for row in vals if row[0] != market_type]
+        for sym, data in port_dict.items():
+            new_rows.append([market_type, sym, str(data['avg_price']), str(data['qty'])])
+            
+        ws.clear()
+        if new_rows:
+            ws.update(new_rows)
+    except Exception as e:
+        st.error(f"ポートフォリオのクラウド同期エラー: {e}")
+
 # ==========================================
-# 🌟 基本設定・モード切替
+# 🌟 基本設定・トップUI
 # ==========================================
-st.title("📊 My AI Analyst Dashboard")
+col_top1, col_top2 = st.columns([3, 1])
+with col_top1:
+    st.title("📊 My AI Analyst Dashboard")
+with col_top2:
+    st.write("")
+    # 🌟 スマホとPCを一発で同期する強制リロードボタン
+    if st.button("🔄 スマホ・PC間を同期", type="primary"):
+        with st.spinner("クラウドから最新のリストを読み込み中..."):
+            st.session_state.watch_list_us = load_watchlist_from_cloud("US")
+            st.session_state.watch_list_jp = load_watchlist_from_cloud("JP")
+            st.session_state.portfolio_us = load_portfolio_from_cloud("US")
+            st.session_state.portfolio_jp = load_portfolio_from_cloud("JP")
+            if 'wl_ver' in st.session_state: st.session_state.wl_ver += 1
+            st.success("最新データを同期しました！")
+            time.sleep(1)
+            st.rerun()
 
 market_mode = st.radio("🌍 分析する市場を切り替え", ["🇺🇸 米国市場 (US)", "🇯🇵 日本市場 (JP)"], horizontal=True)
 is_us = (market_mode == "🇺🇸 米国市場 (US)")
@@ -108,8 +166,9 @@ ticker_suffix_hint = "" if is_us else " (例: 7203 または 7203.T)"
 if 'watch_list_us' not in st.session_state: st.session_state.watch_list_us = load_watchlist_from_cloud("US")
 if 'watch_list_jp' not in st.session_state: st.session_state.watch_list_jp = load_watchlist_from_cloud("JP")
 
-if 'portfolio_us' not in st.session_state: st.session_state.portfolio_us = {}
-if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = {}
+if 'portfolio_us' not in st.session_state: st.session_state.portfolio_us = load_portfolio_from_cloud("US")
+if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = load_portfolio_from_cloud("JP")
+
 if 'company_names' not in st.session_state: st.session_state.company_names = {} 
 if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] 
 
@@ -224,14 +283,19 @@ with tab_top:
                 if p_tick_raw and p_qty > 0:
                     pt = p_tick_raw.strip().upper()
                     if not is_us and pt.isdigit(): pt += ".T"
-                    st.session_state[portfolio_key][pt] = {'avg_price': p_price, 'qty': p_qty}; st.rerun()
+                    st.session_state[portfolio_key][pt] = {'avg_price': p_price, 'qty': p_qty}
+                    save_portfolio_to_cloud(market_type_str, st.session_state[portfolio_key]) # 🌟 クラウドへ保存
+                    st.rerun()
         st.divider()
         if portfolio:
             for t in list(portfolio.keys()):
                 col_a, col_b = st.columns([5, 1])
                 with col_a: st.write(f"**{get_company_name(t)}** : {portfolio[t]['qty']:,.2f} 株 (平均 {curr_sym}{portfolio[t]['avg_price']:,.2f})")
                 with col_b:
-                    if st.button("削除", key=f"del_port_{is_us}_{t}"): del st.session_state[portfolio_key][t]; st.rerun()
+                    if st.button("削除", key=f"del_port_{is_us}_{t}"): 
+                        del st.session_state[portfolio_key][t]
+                        save_portfolio_to_cloud(market_type_str, st.session_state[portfolio_key]) # 🌟 クラウドへ保存
+                        st.rerun()
         else: st.info("登録されている銘柄はありません。")
     st.write("")
 
@@ -306,7 +370,6 @@ with tab_top:
                     c_price = h['Close'].iloc[-1]; p_price = h['Close'].iloc[-2]; diff = c_price - p_price; pct = (diff / p_price) * 100
                     if diff > 0: trend_html = f"<span class='val-up'>↑+{diff:,.2f} (+{pct:.2f}%)</span>"
                     elif diff < 0: trend_html = f"<span class='val-down'>↓{diff:,.2f} ({pct:.2f}%)</span>"
-                    # 🌟 修正箇所：タイポを直しました
                     else: trend_html = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
                     val_str = f"¥{c_price:.2f}" if "JPY" in symbol or "円" in name else f"{c_price:,.2f}"
                     html_macro += f"<div class='item-row'><strong>{name}</strong>: {val_str} ({trend_html})</div>"
@@ -361,7 +424,6 @@ with tab_top:
                         
                         if day_diff > 0: d_trend = f"<span class='val-up'>↑+{day_diff:,.2f} (+{day_pct:.2f}%)</span>"
                         elif day_diff < 0: d_trend = f"<span class='val-down'>↓{day_diff:,.2f} ({day_pct:.2f}%)</span>"
-                        # 🌟 修正箇所：タイポを直しました
                         else: d_trend = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
                         if rsi_val >= 70: rsi_stat = "<span class='val-down'>🔴 過熱</span>"
                         elif rsi_val <= 45: rsi_stat = "<span class='val-up'>🟢 割安</span>"
@@ -523,7 +585,7 @@ with tab1:
                         creds_json = json.loads(st.secrets["google_sheets_creds"])
                         scopes = ['https://www.googleapis.com/auth/spreadsheets']
                         client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
-                        sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0")
+                        sheet = client.open_by_url(SHEET_URL)
                         try: ws = sheet.worksheet("スクリーニング履歴")
                         except gspread.exceptions.WorksheetNotFound:
                             ws = sheet.add_worksheet(title="スクリーニング履歴", rows="1000", cols="10")
@@ -585,7 +647,7 @@ with tab2:
     
     auto_fetch = (st.session_state[f"last_fetched_wl_{is_us}"] != watch_list)
 
-    if st.button("🔄 最新の株価・AI判定に更新（手持リロード）", key=f"t2_fetch_btn_{is_us}") or auto_fetch:
+    if st.button("🔄 最新の株価・AI判定に更新（手動リロード）", key=f"t2_fetch_btn_{is_us}") or auto_fetch:
         with st.spinner('データを取得・計算中...'):
             st.session_state[tracker_data_key] = [] 
             for sym in watch_list:
