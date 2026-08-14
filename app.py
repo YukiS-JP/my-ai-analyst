@@ -43,13 +43,13 @@ if 'company_names' not in st.session_state: st.session_state.company_names = {}
 if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] 
 if 'saved_dates' not in st.session_state: st.session_state.saved_dates = {'🇺🇸 米国市場 (US)': None, '🇯🇵 日本市場 (JP)': None} 
 
-# 🌟 トラッカー用のメモリを新規追加
+# トラッカー用のメモリ
 if 'last_tracker_data' not in st.session_state: st.session_state.last_tracker_data = []
 if 'tracker_saved_dates' not in st.session_state: st.session_state.tracker_saved_dates = {'🇺🇸 米国市場 (US)': None, '🇯🇵 日本市場 (JP)': None}
 
 if 'current_market_mode' not in st.session_state: st.session_state.current_market_mode = market_mode
 
-# 🌟 市場を切り替えたら、表示中のスクリーニング・トラッカーデータをリセット
+# 市場を切り替えたら、表示中のスクリーニング・トラッカーデータをリセット
 if st.session_state.current_market_mode != market_mode:
     st.session_state.last_screened_data = []
     st.session_state.last_tracker_data = []
@@ -77,18 +77,40 @@ INDICATOR_MAP = {
     "配当利回り(%)": {"cols": ["dividend_yield_recent"]}
 }
 
+# 🌟 日本株の確実な日本語名辞書（yfinanceのブロック対策）
+JP_COMPANY_NAMES = {
+    "7203.T": "トヨタ自動車",
+    "1959.T": "九電工",
+    "8035.T": "東京エレクトロン",
+    "9984.T": "ソフトバンクグループ",
+    "6758.T": "ソニーグループ",
+    "9432.T": "日本電信電話",
+    "8306.T": "三菱UFJフィナンシャル・グループ",
+    "6857.T": "アドバンテスト",
+    "9983.T": "ファーストリテイリング",
+    "6594.T": "ニデック"
+}
+
 def get_company_name(sym):
     if is_us: return sym
-    if sym in st.session_state.company_names: return f"{sym} {st.session_state.company_names[sym]}"
+    clean_sym = sym.strip().upper()
+    # 1. 辞書に存在すれば一発で返す（最速・確実）
+    if clean_sym in JP_COMPANY_NAMES:
+        return f"{clean_sym} {JP_COMPANY_NAMES[clean_sym]}"
+    # 2. セッションメモリにあれば返す
+    if clean_sym in st.session_state.company_names: 
+        return f"{clean_sym} {st.session_state.company_names[clean_sym]}"
+    # 3. なければAPIから取得して翻訳
     try:
-        info = yf.Ticker(sym).info
+        info = yf.Ticker(clean_sym).info
         name_en = info.get('shortName') or info.get('longName') or ""
         if name_en:
             name_ja = GoogleTranslator(source='en', target='ja').translate(name_en)
-            st.session_state.company_names[sym] = name_ja
-            return f"{sym} {name_ja}"
-        return sym
-    except: return sym
+            st.session_state.company_names[clean_sym] = name_ja
+            return f"{clean_sym} {name_ja}"
+        return clean_sym
+    except: 
+        return clean_sym
 
 now_utc = datetime.utcnow()
 if is_us:
@@ -256,8 +278,7 @@ with tab_top:
                         delta = hist['Close'].diff()
                         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                         loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-                        rs = gain / loss
-                        rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
+                        rs = gain / loss; rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                         
                         if day_diff > 0: d_trend = f"<span class='val-up'>↑+{day_diff:,.2f} (+{day_pct:.2f}%)</span>"
                         elif day_diff < 0: d_trend = f"<span class='val-down'>↓{day_diff:,.2f} ({day_pct:.2f}%)</span>"
@@ -436,7 +457,7 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🌟 タブ2：個別銘柄トラッカー（二重記録防止 ＆ UI分離対応）
+# 🌟 タブ2：個別銘柄トラッカー
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
@@ -451,12 +472,11 @@ with tab2:
     selected = st.multiselect("📝 現在の監視リスト", options=watch_list, default=watch_list, key=f"t2_select_{is_us}")
     if selected != watch_list: st.session_state[watch_list_key] = selected; st.rerun()
 
-    # 🌟 ボタンを「取得」と「記録」で分離しました！
     if st.button("🎯 最新データを取得してAI判定を実行", key=f"t2_fetch_btn_{is_us}"):
         with st.spinner('データを取得・計算中...'):
-            st.session_state.last_tracker_data = [] # 取得のたびに一旦リセット
+            st.session_state.last_tracker_data = [] 
             for sym in watch_list:
-                disp_name = get_company_name(sym)
+                disp_name = get_company_name(sym) # 🌟 辞書＆翻訳を通した日本語名を取得
                 hist = pd.DataFrame()
                 for attempt in range(3):
                     try:
@@ -489,7 +509,6 @@ with tab2:
                     })
                 except Exception as e: pass
 
-    # 🌟 取得した結果を表示し、保存ボタンを出す
     if st.session_state.last_tracker_data:
         for data in st.session_state.last_tracker_data:
             st.markdown(f"### 📌 {data['ティッカー']} (現在値: {curr_sym}{data['現在値']:,.2f})")
@@ -520,7 +539,6 @@ with tab2:
                             ]
                             sheet.append_row(row)
                         
-                        # 保存日をメモリに記録し、データをクリア
                         st.session_state.tracker_saved_dates[market_mode] = current_market_date
                         st.session_state.last_tracker_data = [] 
                         
