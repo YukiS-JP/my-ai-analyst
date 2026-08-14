@@ -27,16 +27,19 @@ def check_already_saved(market_mode, current_date, sheet_type="screener"):
         client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
         sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0")
         
-        target_ws_name = "スクリーニング履歴" if sheet_type == "screener" else "シート1" # トラッカーはデフォルトのシート1
+        target_ws_name = "スクリーニング履歴" if sheet_type == "screener" else "シート1"
         try:
             ws = sheet.worksheet(target_ws_name)
         except:
             return False
             
         all_values = ws.get_all_values()
+        norm_current_date = current_date.replace('-', '/') # 日付フォーマットのズレを吸収
+        
         for row in reversed(all_values):
             if len(row) >= 2:
-                if current_date in row[0] and market_mode.split(' ')[0] in row[1]:
+                row_date = row[0].replace('-', '/')
+                if norm_current_date in row_date and market_mode.split(' ')[0] in row[1]:
                     return True
         return False
     except:
@@ -292,7 +295,7 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🔍 タブ1：全体スクリーニング（端末間同期対応）
+# 🔍 タブ1：全体スクリーニング（端末間同期・結果保持対応）
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
@@ -419,11 +422,11 @@ with tab1:
             else:
                 st.warning("現在、厳しい条件を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
 
+    # 🌟 検索結果がセッションに残っている場合、またはクラウドで未保存の場合に表示
     if st.session_state.last_screened_data:
         st.write("")
-        # 🌟 クラウド（スプレッドシート）を直接確認してボタン制御
         if check_already_saved(market_mode, current_market_date, sheet_type="screener"):
-            st.success(f"✅ 本日（{current_market_date}）の {market_mode.split(' ')[0]} のスクリーニングデータはクラウド上で保存済みです！")
+            st.success(f"✅ 本日（{current_market_date}）の {market_mode.split(' ')[0]} スクリーニングデータはクラウド上で保存済みです！")
         else:
             if st.button("💾 このスクリーニング結果をスプレッドシートに保存（学習用）", type="primary", key=f"scr_save_btn_{is_us}"):
                 with st.spinner("データを保存中..."):
@@ -438,13 +441,13 @@ with tab1:
                             ws.append_row(["取得日付", "市場", "ティッカー", "現在値", "判定", "推奨購入株数", "RSI", "MACD"])
 
                         for row in st.session_state.last_screened_data: ws.append_row(row)
-                        st.session_state.last_screened_data = [] 
+                        # 🌟 保存後もデータは消さず、クラウド判定によって「保存済み」メッセージに切り替える
                         st.success("✅ スプレッドシートの「スクリーニング履歴」タブに保存しました！")
                         time.sleep(1.5); st.rerun() 
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー（端末間同期対応）
+# 🎯 タブ2：個別銘柄トラッカー（端末間同期・結果保持対応）
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
@@ -503,7 +506,6 @@ with tab2:
             st.info(f"**{data['💡 AI判定']}**"); st.divider()
 
         st.write("")
-        # 🌟 トラッカーもクラウド上の記録を直接確認
         if check_already_saved(market_mode, current_market_date, sheet_type="tracker"):
             st.success(f"✅ 本日（{current_market_date}）の {market_mode.split(' ')[0]} トラッカー記録はクラウド上で保存済みです！")
         else:
@@ -527,7 +529,6 @@ with tab2:
                             ]
                             sheet.append_row(row)
                         
-                        st.session_state.last_tracker_data = [] 
                         st.success("✅ スプレッドシートへの記録が完了しました！")
                         time.sleep(1.5)
                         st.rerun()
