@@ -68,12 +68,11 @@ def generate_reason(row):
 tab_top, tab1, tab2, tab3 = st.tabs(["🏠 トップ", "🔍 スクリーニング", "🎯 トラッカー", "📰 ニュース"])
 
 # ==========================================
-# 🌟 トップ（市場全体サマリー ＆ 監視銘柄数値一覧 ＆ 折りたたみチャート）
+# 🌟 トップ（スマホ最適化・テキストベース一覧）
 # ==========================================
 with tab_top:
     st.subheader("🌐 主要市場サマリー（為替・全体指数）")
     
-    # 🚀 マクロ市場指標の取得（ドル円、S&P500、NASDAQ、日経平均）
     macro_tickers = {
         "米ドル/円": "JPY=X",
         "S&P 500": "^GSPC",
@@ -81,9 +80,8 @@ with tab_top:
         "日経平均": "^N225"
     }
     
-    macro_cols = st.columns(len(macro_tickers))
-    
-    for idx, (name, symbol) in enumerate(macro_tickers.items()):
+    # パネル表示をやめて、スマホでも綺麗に折り返されるテキストリストに変更
+    for name, symbol in macro_tickers.items():
         try:
             t = yf.Ticker(symbol)
             h = t.history(period="5d")
@@ -93,18 +91,23 @@ with tab_top:
                 diff = c_price - p_price
                 pct = (diff / p_price) * 100
                 
+                if diff > 0:
+                    trend = f"🟢 ↑+{diff:,.2f} (+{pct:.2f}%)"
+                elif diff < 0:
+                    trend = f"🔴 ↓{diff:,.2f} ({pct:.2f}%)"
+                else:
+                    trend = "⚪️ ±0.00 (0.00%)"
+                    
                 if symbol == "JPY=X":
                     val_str = f"¥{c_price:.2f}"
-                    diff_str = f"{diff:+.2f} ({pct:+.2f}%)"
                 else:
                     val_str = f"{c_price:,.2f}"
-                    diff_str = f"{diff:+,.2f} ({pct:+.2f}%)"
                     
-                macro_cols[idx].metric(name, val_str, diff_str)
+                st.markdown(f"**{name}** {val_str} （{trend}）")
             else:
-                macro_cols[idx].metric(name, "取得失敗", "")
+                st.markdown(f"**{name}** 取得失敗")
         except Exception:
-            macro_cols[idx].metric(name, "エラー", "")
+            st.markdown(f"**{name}** エラー")
 
     st.divider()
     
@@ -122,7 +125,6 @@ with tab_top:
         for sym in selected_charts:
             st.markdown(f"### 🔹 {sym}")
             
-            # 🚀 数値指標データの表示
             try:
                 ticker = yf.Ticker(sym)
                 hist = ticker.history(period="1y")
@@ -145,18 +147,24 @@ with tab_top:
                     rs = gain / loss
                     rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                     
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("現在値 (前日比)", f"${curr_p:.2f}", f"{day_diff:+.2f} ({day_pct:+.2f}%)")
-                    col2.metric("前月比", f"${curr_p:.2f}", f"{month_pct:+.2f}%")
-                    
+                    if day_diff > 0:
+                        d_trend = f"🟢 ↑+{day_diff:.2f} (+{day_pct:.2f}%)"
+                    elif day_diff < 0:
+                        d_trend = f"🔴 ↓{day_diff:.2f} ({day_pct:.2f}%)"
+                    else:
+                        d_trend = "⚪️ ±0.00 (0.00%)"
+
                     if rsi_val >= 70:
                         rsi_stat = "🔴 過熱"
                     elif rsi_val <= 45:
                         rsi_stat = "🟢 割安"
                     else:
                         rsi_stat = "⚪️ 中立"
-                    col3.metric("日足RSI", f"{rsi_val:.1f}", rsi_stat, delta_color="off")
-                    col4.metric("52週高値差", f"${high_52:.2f}", f"{dd_52:+.1f}%")
+                    
+                    # スマホで一目で把握できるようにコンパクトなテキスト2行で表示
+                    st.markdown(f"- **現在値:** ${curr_p:.2f} （{d_trend}）")
+                    st.markdown(f"- **前月比:** {month_pct:+.2f}% ｜ **RSI:** {rsi_val:.1f} ({rsi_stat}) ｜ **高値差:** {dd_52:+.1f}%")
+                    
             except Exception:
                 st.warning(f"⚠️ {sym} の指標データ取得に失敗しました。")
 
