@@ -196,7 +196,7 @@ with tab2:
                             detail = f"MACDは上向きですが、RSIが{rsi_val:.1f}であり新規買いの基準（45未満）には達していません。"
                         else:
                             detail = f"RSIが{rsi_val:.1f}で中立圏。MACDも方向感がなく、次の波を待つ局面です。"
-                        signal = f"⚪️【静今】{detail}"
+                        signal = f"⚪️【静観】{detail}"
                         
                     data_list.append({
                         'ティッカー': sym,
@@ -245,53 +245,53 @@ with tab2:
                     st.divider()
 
 # ==========================================
-# タブ3：最新ニュース（Googleニュース対応版）
+# タブ3：最新ニュース（全銘柄一括取得版）
 # ==========================================
 with tab3:
-    st.write("監視中の銘柄に関連する最新ニュース（ヘッドライン）をチェックできます。")
+    st.write("監視中の**全銘柄**に関連する最新ニュースを一覧でチェックできます。")
     
     if 'watch_list' in st.session_state and st.session_state.watch_list:
-        news_target = st.selectbox("📰 ニュースを確認する銘柄を選択", st.session_state.watch_list)
-        
-        if st.button(f"🔍 {news_target} の最新ニュースを取得"):
-            with st.spinner(f'{news_target} のニュースを検索中...'):
-                try:
-                    # Google NewsのRSS機能を使って「日本語」を優先的に取得
-                    url = f"https://news.google.com/rss/search?q={news_target}+stock&hl=ja&gl=JP&ceid=JP:ja"
-                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        if st.button("📰 監視リストの最新ニュースを一括取得"):
+            with st.spinner('全銘柄のニュースを検索中...'):
+                for news_target in st.session_state.watch_list:
+                    st.markdown(f"### 📌 {news_target} のニュース")
+                    try:
+                        url = f"https://news.google.com/rss/search?q={news_target}+stock&hl=ja&gl=JP&ceid=JP:ja"
+                        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                        
+                        with urllib.request.urlopen(req) as response:
+                            xml_data = response.read()
+                        
+                        root = ET.fromstring(xml_data)
+                        items = root.findall('.//item')
+                        
+                        if items:
+                            # 縦長になりすぎないように各銘柄3件までに制限
+                            for item in items[:3]:
+                                title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
+                                link = item.find('link').text if item.find('link') is not None else '#'
+                                
+                                source_elem = item.find('source')
+                                publisher = source_elem.text if source_elem is not None else '配信元不明'
+                                
+                                pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
+                                dt = "時刻不明"
+                                
+                                if pub_date_str:
+                                    time_tuple = email.utils.parsedate_tz(pub_date_str)
+                                    if time_tuple:
+                                        timestamp = email.utils.mktime_tz(time_tuple)
+                                        dt_obj = datetime.utcfromtimestamp(timestamp) + timedelta(hours=9)
+                                        dt = dt_obj.strftime('%Y/%m/%d %H:%M')
+                                        
+                                st.markdown(f"**[{title}]({link})**")
+                                st.caption(f"🏢 配信元: {publisher}  |  🕒 配信日時: {dt}")
+                        else:
+                            st.info(f"{news_target} に関連する最新ニュースは見つかりませんでした。")
+                    except Exception as e:
+                        st.error(f"{news_target} のニュース取得中にエラーが発生しました。")
                     
-                    with urllib.request.urlopen(req) as response:
-                        xml_data = response.read()
-                    
-                    root = ET.fromstring(xml_data)
-                    items = root.findall('.//item')
-                    
-                    if items:
-                        st.success(f"{news_target} の最新ニュースを取得しました。")
-                        for item in items[:5]:  # 最新5件を表示
-                            title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
-                            link = item.find('link').text if item.find('link') is not None else '#'
-                            
-                            source_elem = item.find('source')
-                            publisher = source_elem.text if source_elem is not None else '配信元不明'
-                            
-                            pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
-                            dt = "時刻不明"
-                            
-                            if pub_date_str:
-                                time_tuple = email.utils.parsedate_tz(pub_date_str)
-                                if time_tuple:
-                                    timestamp = email.utils.mktime_tz(time_tuple)
-                                    # 日本時間に変換
-                                    dt_obj = datetime.utcfromtimestamp(timestamp) + timedelta(hours=9)
-                                    dt = dt_obj.strftime('%Y/%m/%d %H:%M')
-                                    
-                            st.markdown(f"#### [{title}]({link})")
-                            st.caption(f"🏢 配信元: {publisher}  |  🕒 配信日時: {dt} (日本時間)")
-                            st.divider()
-                    else:
-                        st.warning(f"現在、{news_target} に関連する最新ニュースは見つかりませんでした。")
-                except Exception as e:
-                    st.error("ニュースの取得中にエラーが発生しました。時間を置いて再度お試しください。")
+                    # 銘柄ごとの区切り線
+                    st.divider()
     else:
         st.info("タブ2（個別銘柄トラッカー）で監視リストに銘柄を追加してください。")
