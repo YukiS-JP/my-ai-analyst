@@ -14,9 +14,51 @@ st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wid
 st.title("📊 My AI Analyst Dashboard")
 
 # ------------------------------------------------
-# アプリ画面の構築（タブで2画面に分割）
+# AIによる「ステータス判定・選定理由」を生成する関数
 # ------------------------------------------------
-tab1, tab2 = st.tabs(["🔍 全体スクリーニング", "🎯 個別銘柄トラッカー"])
+def generate_reason(row):
+    reasons = []
+    
+    rsi = pd.to_numeric(row.get('日足RSI'), errors='coerce')
+    macd = pd.to_numeric(row.get('日足MACD'), errors='coerce')
+    sig = pd.to_numeric(row.get('日足シグナル'), errors='coerce')
+    perf = pd.to_numeric(row.get('週足パフォーマンス(%)'), errors='coerce')
+    per = pd.to_numeric(row.get('PER(倍)'), errors='coerce')
+    
+    if pd.notna(rsi):
+        if rsi < 35:
+            reasons.append(f"日足RSIが{rsi:.1f}と極度の売られすぎ水準です。")
+        elif rsi < 45:
+            reasons.append(f"日足RSI{rsi:.1f}で調整が進み、押し目買い候補です。")
+        elif rsi > 70:
+            reasons.append(f"日足RSI{rsi:.1f}で過熱感あり。短期的な利確目安です。")
+            
+    if pd.notna(macd) and pd.notna(sig):
+        if macd > sig:
+            reasons.append("MACD好転（買いシグナル）点灯中。")
+
+    if pd.notna(perf):
+        if perf > 0:
+            reasons.append("週足トレンドは上向きを維持。")
+        else:
+            reasons.append("週足は調整局面（スイング底打ち狙い）。")
+
+    if pd.notna(per) and per > 0:
+        if per < 15:
+            reasons.append(f"PER{per:.1f}倍で非常に割安な水準です。")
+        elif per < 30:
+            reasons.append(f"PER{per:.1f}倍と適正な評価水準です。")
+
+    if not reasons:
+        return "現在、特筆すべき強いシグナルはありません（静観推奨）。"
+    
+    return " ".join(reasons)
+
+
+# ------------------------------------------------
+# アプリ画面の構築（タブで3画面に分割）
+# ------------------------------------------------
+tab1, tab2, tab3 = st.tabs(["🔍 全体スクリーニング", "🎯 個別銘柄トラッカー", "📰 最新ニュース"])
 
 # ==========================================
 # タブ1：全体スクリーニング
@@ -51,7 +93,6 @@ with tab1:
                 
                 st.success("分析完了！現在のスイング推奨銘柄です。")
                 
-                # スクリーニング結果をカード形式で表示
                 for index, row in df.iterrows():
                     st.markdown(f"### 📌 {row['ティッカー']} (現在値: ${row['現在値($)']})")
                     st.markdown(f"- **日足RSI:** {row['日足RSI']}  |  **週足パフォーマンス:** {row['週足パフォーマンス(%)']}%  |  **PER:** {row['PER(倍)']}倍")
@@ -90,7 +131,6 @@ with tab2:
         st.session_state.watch_list = selected
         st.rerun()
 
-    # 🚀 取得＆自動記録ボタン
     if st.button("🎯 最新データを取得 ＆ シートに仮想売買を記録"):
         with st.spinner('データを取得・計算し、スプレッドシートに記録中...'):
             symbols_list = st.session_state.watch_list
@@ -137,7 +177,6 @@ with tab2:
                     else:
                         perf_w = np.nan
                         
-                    # 💡 【仮想売買の自動判定ルール ＋ 詳細な理由付け】
                     if rsi_val > 70:
                         detail = f"RSIが{rsi_val:.1f}と過熱圏に達しました。利益確定を推奨します。"
                         signal = f"🔴【仮想売】{detail}"
@@ -178,7 +217,6 @@ with tab2:
                 except Exception as e:
                     pass
             
-            # --- スプレッドシートへの記録 ---
             if rows_to_append:
                 try:
                     creds_json = json.loads(st.secrets["google_sheets_creds"])
@@ -196,13 +234,49 @@ with tab2:
                 except Exception as e:
                     st.error(f"⚠️ スプレッドシートへの記録に失敗しました: {e}")
             
-            # --- 画面への結果表示（見切れ防止のカード形式） ---
             if data_list:
                 for data in data_list:
-                    # 銘柄名と価格を見出しにする
                     st.markdown(f"### 📌 {data['ティッカー']} (現在値: ${data['現在値($)']:.2f})")
-                    # 数値データを並べる
                     st.markdown(f"- **日足RSI:** {data['日足RSI']:.1f}  |  **週足パフォーマンス:** {data['週足パフォーマンス(%)']:.1f}%")
-                    # AIの判定文を独立した行で表示（これで見切れません！）
                     st.info(f"**{data['💡 AI判定']}**")
-                    st.divider() # 区切り線
+                    st.divider()
+
+# ==========================================
+# タブ3：最新ニュース（追加機能）
+# ==========================================
+with tab3:
+    st.write("監視中の銘柄に関連する最新ニュース（ヘッドライン）をチェックできます。")
+    
+    if 'watch_list' in st.session_state and st.session_state.watch_list:
+        news_target = st.selectbox("📰 ニュースを確認する銘柄を選択", st.session_state.watch_list)
+        
+        if st.button(f"🔍 {news_target} の最新ニュースを取得"):
+            with st.spinner(f'{news_target} のニュースを検索中...'):
+                try:
+                    ticker = yf.Ticker(news_target)
+                    news_list = ticker.news
+                    
+                    if news_list:
+                        st.success(f"{news_target} の最新ニュースを取得しました。")
+                        for article in news_list[:5]:  # 最新5件を表示
+                            title = article.get('title', 'タイトルなし')
+                            link = article.get('link', '#')
+                            publisher = article.get('publisher', '配信元不明')
+                            pub_time = article.get('providerPublishTime')
+                            
+                            # タイムスタンプを日本時間に変換
+                            if pub_time:
+                                dt = (datetime.utcfromtimestamp(pub_time) + timedelta(hours=9)).strftime('%Y/%m/%d %H:%M')
+                            else:
+                                dt = "時刻不明"
+                                
+                            # タイトルをリンクにして表示
+                            st.markdown(f"#### [{title}]({link})")
+                            st.caption(f"🏢 配信元: {publisher}  |  🕒 配信日時: {dt} (日本時間)")
+                            st.divider()
+                    else:
+                        st.warning(f"現在、{news_target} に関連する最新ニュースは見つかりませんでした。")
+                except Exception as e:
+                    st.error("ニュースの取得中にエラーが発生しました。時間を置いて再度お試しください。")
+    else:
+        st.info("タブ2（個別銘柄トラッカー）で監視リストに銘柄を追加してください。")
