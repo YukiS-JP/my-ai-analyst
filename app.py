@@ -17,24 +17,45 @@ from deep_translator import GoogleTranslator
 
 st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wide")
 
-# 🌟 スマホ最適化：タブの見切れ防止＆自動折り返しUI
+# ==========================================
+# 🌟 スマホUI完全最適化（2列×2行のタイル状ボタンに強制上書き）
+# ==========================================
 st.markdown("""
     <style>
-        .stTabs [data-baseweb="tab-list"] {
+        /* タブを包む親要素の横スクロールロックを強制解除 */
+        div[data-testid="stTabs"] > div:nth-child(1),
+        div[data-testid="stTabs"] > div:nth-child(1) > div {
+            overflow-x: visible !important;
+            overflow-y: visible !important;
+        }
+        /* タブのリストを折り返し可能（Wrap）に設定 */
+        div[data-baseweb="tab-list"] {
             flex-wrap: wrap !important;
-            row-gap: 8px; /* 改行時の行間の余白 */
-            padding-bottom: 5px;
+            gap: 8px !important;
+            padding-bottom: 10px !important;
         }
-        .stTabs [data-baseweb="tab"] {
-            flex-grow: 1 !important; /* タブの幅を均等に広げる */
-            justify-content: center !important; /* 文字を中央揃えに */
+        /* 各タブを「ボタン風」のタイルにする（スマホ幅で約45%ずつ＝2列になる） */
+        button[data-baseweb="tab"] {
+            flex: 1 1 40% !important; 
+            justify-content: center !important;
+            background-color: rgba(255, 255, 255, 0.05) !important;
             border-radius: 8px !important;
-            background-color: rgba(255, 255, 255, 0.05); /* 少し背景色をつけてボタンっぽく */
-            margin-right: 4px;
-            padding: 8px 16px !important;
+            margin: 0 !important;
+            padding: 10px 5px !important;
+            border: 1px solid rgba(255,255,255,0.1) !important;
         }
-        .stTabs [aria-selected="true"] {
-            background-color: rgba(130, 177, 255, 0.15) !important; /* 選択中のタブを強調 */
+        /* 折り返すとズレる標準のアンダーライン（ハイライト）を隠す */
+        div[data-baseweb="tab-highlight"] {
+            display: none !important;
+        }
+        /* 選択中のタブは全体を青く光らせる */
+        button[data-baseweb="tab"][aria-selected="true"] {
+            background-color: rgba(130, 177, 255, 0.2) !important;
+            border: 1px solid #82B1FF !important;
+        }
+        button[data-baseweb="tab"] > div[data-testid="stMarkdownContainer"] > p {
+            font-size: 15px !important;
+            font-weight: bold !important;
         }
     </style>
 """, unsafe_allow_html=True)
