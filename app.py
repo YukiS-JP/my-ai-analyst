@@ -37,51 +37,8 @@ if 'macro_dict' not in st.session_state:
 if 'macro_display_list' not in st.session_state:
     st.session_state.macro_display_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
 
-# 🌟 ポートフォリオ用のセッションステートを追加
 if 'portfolio' not in st.session_state:
-    st.session_state.portfolio = {} # {'SOXL': {'avg_price': 30.0, 'qty': 100}}
-
-# ------------------------------------------------
-# AIによる「ステータス判定・選定理由」を生成する関数
-# ------------------------------------------------
-def generate_reason(row):
-    reasons = []
-    
-    rsi = pd.to_numeric(row.get('日足RSI'), errors='coerce')
-    macd = pd.to_numeric(row.get('日足MACD'), errors='coerce')
-    sig = pd.to_numeric(row.get('日足シグナル'), errors='coerce')
-    perf = pd.to_numeric(row.get('週足パフォーマンス(%)'), errors='coerce')
-    per = pd.to_numeric(row.get('PER(倍)'), errors='coerce')
-    
-    if pd.notna(rsi):
-        if rsi < 35:
-            reasons.append(f"日足RSIが{rsi:.1f}と極度の売られすぎ水準です。")
-        elif rsi < 45:
-            reasons.append(f"日足RSI{rsi:.1f}で調整が進み、押し目買い候補です。")
-        elif rsi > 70:
-            reasons.append(f"日足RSI{rsi:.1f}で過熱感あり。短期的な利確目安です。")
-            
-    if pd.notna(macd) and pd.notna(sig):
-        if macd > sig:
-            reasons.append("MACD好転（買いシグナル）点灯中。")
-
-    if pd.notna(perf):
-        if perf > 0:
-            reasons.append("週足トレンドは上向きを維持。")
-        else:
-            reasons.append("週足は調整局面（スイング底打ち狙い）。")
-
-    if pd.notna(per) and per > 0:
-        if per < 15:
-            reasons.append(f"PER{per:.1f}倍で非常に割安な水準です。")
-        elif per < 30:
-            reasons.append(f"PER{per:.1f}倍と適正な評価水準です。")
-
-    if not reasons:
-        return "現在、特筆すべき強いシグナルはありません（静観推奨）。"
-    
-    return " ".join(reasons)
-
+    st.session_state.portfolio = {}
 
 # ------------------------------------------------
 # アプリ画面の構築（タブで4画面に分割）
@@ -405,19 +362,21 @@ with tab_top:
                 components.html(html_code, height=400)
 
 # ==========================================
-# タブ1：全体スクリーニング
+# タブ1：全体スクリーニング（🌟 基準厳格化 ＆ AI理由付け）
 # ==========================================
 with tab1:
     st.write("日足（タイミング）・週足（トレンド）・ファンダ（割安性）を統合し、反発期待の銘柄を探します。")
     
-    if st.button("🚀 最新のチャンス銘柄をスクリーニング"):
-        with st.spinner('市場全体から条件に合う銘柄を抽出中...'):
+    if st.button("🚀 厳選チャンス銘柄をスクリーニング"):
+        with st.spinner('市場全体から厳しい条件に合う銘柄を抽出中...'):
+            # 🌟 選定基準を大幅に厳しくしたクエリ
             q = (Query()
                  .select('name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm', 'market_cap_basic')
                  .where(
-                     Column('market_cap_basic') > 1_000_000_000,
-                     Column('RSI') < 45,
-                     Column('volume') > 1_000_000
+                     Column('market_cap_basic') > 10_000_000_000,  # 100億ドル以上の大型・優良株限定
+                     Column('RSI') < 40,                           # RSI40未満の強い売られすぎ水準
+                     Column('volume') > 2_000_000,                 # 出来高200万以上の高流動性
+                     Column('price_earnings_ttm') > 0              # 赤字企業を排除
                  )
                  .order_by('RSI', ascending=True)
                  .limit(10))
@@ -432,17 +391,47 @@ with tab1:
                 df.columns = ['ティッカー', '現在値($)', '日足RSI', '日足MACD', '日足シグナル', '週足パフォーマンス(%)', 'PER(倍)']
                 
                 df['日足RSI'] = pd.to_numeric(df['日足RSI'], errors='coerce').round(1)
+                df['日足MACD'] = pd.to_numeric(df['日足MACD'], errors='coerce').round(2)
+                df['日足シグナル'] = pd.to_numeric(df['日足シグナル'], errors='coerce').round(2)
                 df['週足パフォーマンス(%)'] = pd.to_numeric(df['週足パフォーマンス(%)'], errors='coerce').round(1)
                 df['PER(倍)'] = pd.to_numeric(df['PER(倍)'], errors='coerce').round(1)
                 
-                st.success("分析完了！現在のスイング推奨銘柄です。")
+                st.success("🎯 厳格なスクリーニングを通過した銘柄です！")
                 
                 for index, row in df.iterrows():
                     st.markdown(f"### 📌 {row['ティッカー']} (現在値: ${row['現在値($)']})")
-                    st.markdown(f"- **日足RSI:** {row['日足RSI']}  |  **週足パフォーマンス:** {row['週足パフォーマンス(%)']}%  |  **PER:** {row['PER(倍)']}倍")
+                    
+                    # 🌟 明確な理由付けの文章生成ロジック
+                    reasons = []
+                    
+                    # 1. RSIからの視点
+                    if row['日足RSI'] < 30:
+                        reasons.append(f"**RSIが{row['日足RSI']}**と極度の売られすぎ水準にあり、短期的な反発余地が大きい状態です。")
+                    else:
+                        reasons.append(f"**RSIが{row['日足RSI']}**で十分に調整が進んでおり、押し目買いの好機と判断できます。")
+                        
+                    # 2. MACDからの視点
+                    if pd.notna(row['日足MACD']) and pd.notna(row['日足シグナル']):
+                        if row['日足MACD'] > row['日足シグナル']:
+                            reasons.append("日足MACDがシグナルを上抜け（**ゴールデンクロス**）しており、トレンド反転の強いサインが点灯しています。")
+                        else:
+                            reasons.append("MACDはまだ下落トレンドを示しているため、**打診買い（少なめ）**から入るか、反発を確認してからのエントリーが安全です。")
+                            
+                    # 3. PER（ファンダメンタルズ）からの視点
+                    if pd.notna(row['PER(倍)']):
+                        if row['PER(倍)'] < 15:
+                            reasons.append(f"**PERが{row['PER(倍)']}倍**と市場平均より非常に割安な水準であり、下値不安が限定的です。")
+                        elif row['PER(倍)'] < 25:
+                            reasons.append(f"**PERが{row['PER(倍)']}倍**と適正水準であり、業績の裏付けを持った大型株です。")
+                        else:
+                            reasons.append(f"PERは{row['PER(倍)']}倍とやや高めですが、成長期待が織り込まれている銘柄です。")
+                            
+                    # データと理由を画面に出力
+                    st.markdown(f"- **指標データ:** 日足RSI: {row['日足RSI']} ｜ MACD: {row['日足MACD']} ｜ PER: {row['PER(倍)']}倍 ｜ 前週比: {row['週足パフォーマンス(%)']}%")
+                    st.info("💡 **AI選定理由:**\n\n" + "\n".join([f"- {r}" for r in reasons]))
                     st.divider()
             else:
-                st.warning("現在、厳しい条件を全て満たす銘柄は見つかりませんでした。")
+                st.warning("現在、厳しい条件を全て満たす銘柄は見つかりませんでした。（相場全体が過熱しているか、優良な押し目がない状態です。無駄なトレードを避け、静観を推奨します）")
 
 # ==========================================
 # タブ2：個別銘柄トラッカー ＆ スプレッドシート自動記録
