@@ -29,17 +29,17 @@ market_mode = st.radio(
 )
 is_us = (market_mode == "🇺🇸 米国市場 (US)")
 
-# 通貨・市場・サフィックス設定
 curr_sym = "$" if is_us else "¥"
 market_name_tv = 'america' if is_us else 'japan'
 ticker_suffix_hint = "" if is_us else " (例: 7203.T)"
 
-# --- セッションステート（日米独立のデータ保存） ---
+# --- セッションステート初期化 ---
 if 'watch_list_us' not in st.session_state: st.session_state.watch_list_us = ["SOXL", "RDW", "DNA", "FNGU"]
 if 'watch_list_jp' not in st.session_state: st.session_state.watch_list_jp = ["7203.T", "1959.T", "8035.T", "9984.T"]
 if 'portfolio_us' not in st.session_state: st.session_state.portfolio_us = {}
 if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = {}
 if 'company_names' not in st.session_state: st.session_state.company_names = {} 
+if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] # 🌟 履歴保存用メモリ
 
 watch_list_key = 'watch_list_us' if is_us else 'watch_list_jp'
 portfolio_key = 'portfolio_us' if is_us else 'portfolio_jp'
@@ -52,10 +52,8 @@ if 'macro_dict' not in st.session_state:
         "日経平均": "^N225", "米国10年債利回り": "^TNX", "原油(WTI)": "CL=F", 
         "ゴールド(金)": "GC=F", "ビットコイン": "BTC-USD"
     }
-if 'macro_display_list' not in st.session_state:
-    st.session_state.macro_display_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
-if 'screener_indicators' not in st.session_state:
-    st.session_state.screener_indicators = ["RSI (14日)", "MACD", "PER (株価収益率)", "PBR (株価純資産倍率)"]
+if 'macro_display_list' not in st.session_state: st.session_state.macro_display_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
+if 'screener_indicators' not in st.session_state: st.session_state.screener_indicators = ["RSI (14日)", "MACD", "PER (株価収益率)", "PBR (株価純資産倍率)"]
 
 INDICATOR_MAP = {
     "RSI (14日)": {"cols": ["RSI"]}, "MACD": {"cols": ["MACD.macd", "MACD.signal"]},
@@ -65,7 +63,6 @@ INDICATOR_MAP = {
     "配当利回り(%)": {"cols": ["dividend_yield_recent"]}
 }
 
-# 🌟 企業名を自動取得＆日本語翻訳する関数
 def get_company_name(sym):
     if is_us: return sym
     if sym in st.session_state.company_names: return f"{sym} {st.session_state.company_names[sym]}"
@@ -77,8 +74,15 @@ def get_company_name(sym):
             st.session_state.company_names[sym] = name_ja
             return f"{sym} {name_ja}"
         return sym
-    except:
-        return sym
+    except: return sym
+
+now_jst = datetime.utcnow() + timedelta(hours=9)
+
+# ==========================================
+# 🌟 【新機能】月末のAIコンサル要求アラート（毎月25日以降に表示）
+# ==========================================
+if now_jst.day >= 25:
+    st.info("💡 **【AIアナリストからのコンサルティング要求】**\n月末が近づいています！スプレッドシートに蓄積された「スクリーニング履歴」のデータをコピーして、私（AI）に分析をご依頼ください。抽出銘柄の勝率を割り出し、来月に向けてフィルターの精度を上げるための学習アップデートを行いましょう！")
 
 # ------------------------------------------------
 # アプリ画面の構築（タブで4画面に分割）
@@ -106,8 +110,7 @@ with tab_top:
         </style>
     """, unsafe_allow_html=True)
 
-    with st.expander(f"💼 {market_mode.split(' ')[0]} ポートフォリオの編集（保有銘柄の登録・削除）"):
-        st.markdown(f"**1️⃣ 保有銘柄の登録・更新**")
+    with st.expander(f"💼 {market_mode.split(' ')[0]} ポートフォリオの編集"):
         c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
         with c1: p_tick = st.text_input(f"ティッカー{ticker_suffix_hint}", key="p_tick")
         with c2: p_price = st.number_input(f"平均取得単価 ({curr_sym})", min_value=0.0, step=0.1 if is_us else 1.0, format="%.2f", key="p_price")
@@ -116,22 +119,15 @@ with tab_top:
             st.write(""); st.write("")
             if st.button("登録", key="p_add"):
                 if p_tick and p_qty > 0:
-                    st.session_state[portfolio_key][p_tick.strip().upper()] = {'avg_price': p_price, 'qty': p_qty}
-                    st.rerun()
-        
+                    st.session_state[portfolio_key][p_tick.strip().upper()] = {'avg_price': p_price, 'qty': p_qty}; st.rerun()
         st.divider()
-        st.markdown("**2️⃣ 現在の登録内容（削除）**")
         if portfolio:
             for t in list(portfolio.keys()):
                 col_a, col_b = st.columns([5, 1])
-                disp_name = get_company_name(t)
-                with col_a: st.write(f"**{disp_name}** : {portfolio[t]['qty']:,.2f} 株 (平均 {curr_sym}{portfolio[t]['avg_price']:,.2f})")
+                with col_a: st.write(f"**{get_company_name(t)}** : {portfolio[t]['qty']:,.2f} 株 (平均 {curr_sym}{portfolio[t]['avg_price']:,.2f})")
                 with col_b:
-                    if st.button("削除", key=f"del_port_{t}"):
-                        del st.session_state[portfolio_key][t]
-                        st.rerun()
-        else:
-            st.info("現在登録されている保有銘柄はありません。")
+                    if st.button("削除", key=f"del_port_{t}"): del st.session_state[portfolio_key][t]; st.rerun()
+        else: st.info("登録されている銘柄はありません。")
     st.write("")
 
     with st.spinner("最新データを取得中..."):
@@ -142,11 +138,9 @@ with tab_top:
             except: usd_jpy = 150.0
 
             for sym, data in portfolio.items():
-                qty = data['qty']; avg_p = data['avg_price']
-                disp_name = get_company_name(sym)
+                qty = data['qty']; avg_p = data['avg_price']; disp_name = get_company_name(sym)
                 try:
-                    t = yf.Ticker(sym)
-                    h = t.history(period="1d")
+                    h = yf.Ticker(sym).history(period="1d")
                     if not h.empty:
                         c_price = h['Close'].iloc[-1]
                         cost = avg_p * qty; val = c_price * qty; pnl = val - cost
@@ -154,16 +148,13 @@ with tab_top:
                         total_cost += cost; total_value += val
                         pnl_class = 'val-up' if pnl > 0 else 'val-down' if pnl < 0 else 'val-neutral'
                         sign = '+' if pnl > 0 else ''
-                        
                         jpy_txt = f" <span style='font-size:12px; color:#888;'>(約 ¥{int(val * usd_jpy):,})</span>" if is_us else ""
-                        
                         details_html += f"<div class='item-row sym-title'>🔹 {disp_name} <span style='font-size: 13px; color:#888; font-weight:normal;'>({qty:,.2f}株)</span></div>"
                         details_html += f"<div class='item-sub-row'>┣ <strong>評価額:</strong> {curr_sym}{val:,.2f}{jpy_txt} (現在値: {curr_sym}{c_price:,.2f})<br>┗ <strong>含み損益:</strong> <span class='{pnl_class}'>{sign}{curr_sym}{pnl:,.2f} ({sign}{pnl_pct:.2f}%)</span> ｜ 取得単価: {curr_sym}{avg_p:,.2f}</div>"
                     else: details_html += f"<div class='item-row'>🔹 <strong>{disp_name}</strong>: データ取得エラー</div>"
-                except: details_html += f"<div class='item-row'>🔹 <strong>{disp_name}</strong>: エラー (ティッカーを確認)</div>"
+                except: details_html += f"<div class='item-row'>🔹 <strong>{disp_name}</strong>: エラー</div>"
             
-            tot_pnl = total_value - total_cost
-            tot_pct = (tot_pnl / total_cost) * 100 if total_cost > 0 else 0
+            tot_pnl = total_value - total_cost; tot_pct = (tot_pnl / total_cost) * 100 if total_cost > 0 else 0
             tot_class = 'val-up' if tot_pnl > 0 else 'val-down' if tot_pnl < 0 else 'val-neutral'
             tot_sign = '+' if tot_pnl > 0 else ''
             tot_jpy_txt = f" <span style='font-size:16px; color:#888; font-weight:normal;'>(約 ¥{int(total_value * usd_jpy):,})</span>" if is_us else ""
@@ -171,7 +162,7 @@ with tab_top:
             port_html += f"<div style='font-size: 24px; color: #FFFFFF; font-weight: bold; margin-bottom: 5px;'>総評価額: {curr_sym}{total_value:,.2f}{tot_jpy_txt}</div>"
             port_html += f"<div style='font-size: 18px; margin-bottom: 15px;'>トータル含み損益: <span class='{tot_class}'>{tot_sign}{curr_sym}{tot_pnl:,.2f} ({tot_sign}{tot_pct:.2f}%)</span></div><hr style='border-color: #2D303E; margin: 10px 0;'>"
             port_html += details_html
-        else: port_html += f"<div class='item-row val-neutral'>保有銘柄が登録されていません。「💼 ポートフォリオの編集」から追加してください。</div>"
+        else: port_html += f"<div class='item-row val-neutral'>保有銘柄が登録されていません。</div>"
         port_html += "</div>"
         st.markdown(port_html, unsafe_allow_html=True)
 
@@ -179,25 +170,22 @@ with tab_top:
         with col1: st.subheader("🌍 主要市場サマリー")
         with col2:
             with st.popover("⚙️ 編集"):
-                new_macro_name = st.text_input("📝 表示名", placeholder="半導体指数", key="mac_name")
-                new_macro_tick = st.text_input("🔤 ティッカー", placeholder="^SOX", key="mac_tick")
+                new_macro_name = st.text_input("📝 表示名", key="mac_name"); new_macro_tick = st.text_input("🔤 ティッカー", key="mac_tick")
                 if st.button("➕ 追加する", key="add_macro_btn"):
                     if new_macro_name and new_macro_tick:
                         st.session_state.macro_dict[new_macro_name] = new_macro_tick
                         if new_macro_name not in st.session_state.macro_display_list: st.session_state.macro_display_list.append(new_macro_name)
                         st.rerun()
                 st.divider()
-                selected_macros = st.multiselect("表示する指標", options=list(st.session_state.macro_dict.keys()), default=st.session_state.macro_display_list, key="macro_select")
+                selected_macros = st.multiselect("表示", options=list(st.session_state.macro_dict.keys()), default=st.session_state.macro_display_list, key="macro_select")
                 if set(selected_macros) != set(st.session_state.macro_display_list):
                     new_list = [m for m in st.session_state.macro_display_list if m in selected_macros]
                     for m in selected_macros:
                         if m not in new_list: new_list.append(m)
-                    st.session_state.macro_display_list = new_list
-                    st.rerun()
+                    st.session_state.macro_display_list = new_list; st.rerun()
                 if st.session_state.macro_display_list:
                     sorted_macros = sort_items(st.session_state.macro_display_list, key="macro_sort")
-                    if sorted_macros != st.session_state.macro_display_list:
-                        st.session_state.macro_display_list = sorted_macros; st.rerun()
+                    if sorted_macros != st.session_state.macro_display_list: st.session_state.macro_display_list = sorted_macros; st.rerun()
 
         html_macro = "<div class='dashboard-panel'>"
         for name in st.session_state.macro_display_list:
@@ -205,13 +193,11 @@ with tab_top:
             try:
                 t = yf.Ticker(symbol); h = t.history(period="5d")
                 if not h.empty and len(h) >= 2:
-                    c_price = h['Close'].iloc[-1]; p_price = h['Close'].iloc[-2]
-                    diff = c_price - p_price; pct = (diff / p_price) * 100
+                    c_price = h['Close'].iloc[-1]; p_price = h['Close'].iloc[-2]; diff = c_price - p_price; pct = (diff / p_price) * 100
                     if diff > 0: trend_html = f"<span class='val-up'>↑+{diff:,.2f} (+{pct:.2f}%)</span>"
                     elif diff < 0: trend_html = f"<span class='val-down'>↓{diff:,.2f} ({pct:.2f}%)</span>"
                     else: trend_html = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
-                    if "JPY" in symbol or "円" in name: val_str = f"¥{c_price:.2f}"
-                    else: val_str = f"{c_price:,.2f}"
+                    val_str = f"¥{c_price:.2f}" if "JPY" in symbol or "円" in name else f"{c_price:,.2f}"
                     html_macro += f"<div class='item-row'><strong>{name}</strong>: {val_str} ({trend_html})</div>"
                 else: html_macro += f"<div class='item-row'><strong>{name}</strong>: 取得失敗</div>"
             except: html_macro += f"<div class='item-row'><strong>{name}</strong>: エラー</div>"
@@ -223,12 +209,11 @@ with tab_top:
         with col4:
             with st.popover("⚙️ 編集"):
                 new_watch_tick = st.text_input(f"🔤 ティッカー{ticker_suffix_hint}", key="watch_tick")
-                if st.button("➕ 追加する", key="add_watch_btn"):
+                if st.button("➕ 追加", key="add_watch_btn"):
                     c_tick = new_watch_tick.strip().upper()
-                    if c_tick and c_tick not in watch_list:
-                        st.session_state[watch_list_key].append(c_tick); st.rerun()
+                    if c_tick and c_tick not in watch_list: st.session_state[watch_list_key].append(c_tick); st.rerun()
                 st.divider()
-                selected_watch = st.multiselect("表示する銘柄", options=watch_list, default=watch_list, key="watch_select")
+                selected_watch = st.multiselect("表示", options=watch_list, default=watch_list, key="watch_select")
                 if set(selected_watch) != set(watch_list):
                     new_w_list = [m for m in watch_list if m in selected_watch]
                     for m in selected_watch:
@@ -236,8 +221,7 @@ with tab_top:
                     st.session_state[watch_list_key] = new_w_list; st.rerun()
                 if watch_list:
                     sorted_watch = sort_items(watch_list, key="watch_sort_dd")
-                    if sorted_watch != watch_list:
-                        st.session_state[watch_list_key] = sorted_watch; st.rerun()
+                    if sorted_watch != watch_list: st.session_state[watch_list_key] = sorted_watch; st.rerun()
 
         html_watch = "<div class='dashboard-panel'>"
         if watch_list:
@@ -250,14 +234,12 @@ with tab_top:
                         week_p = hist['Close'].iloc[-6] if len(hist) >= 6 else prev_p
                         month_p = hist['Close'].iloc[-22]
                         day_diff = curr_p - prev_p; day_pct = (day_diff / prev_p) * 100
-                        week_pct = ((curr_p - week_p) / week_p) * 100
-                        month_pct = ((curr_p - month_p) / month_p) * 100
+                        week_pct = ((curr_p - week_p) / week_p) * 100; month_pct = ((curr_p - month_p) / month_p) * 100
                         high_52 = hist['High'].max(); dd_52 = ((curr_p - high_52) / high_52) * 100
                         delta = hist['Close'].diff()
                         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                         loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-                        rs = gain / loss
-                        rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
+                        rs = gain / loss; rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                         
                         if day_diff > 0: d_trend = f"<span class='val-up'>↑+{day_diff:,.2f} (+{day_pct:.2f}%)</span>"
                         elif day_diff < 0: d_trend = f"<span class='val-down'>↓{day_diff:,.2f} ({day_pct:.2f}%)</span>"
@@ -278,36 +260,21 @@ with tab_top:
     st.write("")
     if watch_list:
         for sym in watch_list:
-            disp_name = get_company_name(sym)
-            tv_sym = sym.replace('.T', '') if not is_us else sym
+            disp_name = get_company_name(sym); tv_sym = sym.replace('.T', '') if not is_us else sym
             with st.expander(f"📈 {disp_name} の詳細チャートを開く / 閉じる"):
                 html_code = f"""<div class="tradingview-widget-container"><div id="tradingview_{tv_sym}"></div><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"width": "100%", "height": 400, "symbol": "{tv_sym}", "interval": "D", "timezone": "Asia/Tokyo", "theme": "dark", "style": "1", "locale": "ja", "enable_publishing": false, "allow_symbol_change": true, "hide_top_toolbar": false, "container_id": "tradingview_{tv_sym}"}});</script></div>"""
                 components.html(html_code, height=400)
 
 # ==========================================
-# 🌟 タブ1：全体スクリーニング（AI学習：長期トレンドフィルター搭載）
+# 🌟 タブ1：全体スクリーニング（履歴保存機能付き）
 # ==========================================
 with tab1:
     st.write(f"**{market_mode.split(' ')[0]}の市場全体**から、厳しい条件をクリアした反発期待の優良株を探します。")
     
-    with st.expander("📖 投資の基礎知識（各指標の意味と分析の目安）"):
-        st.markdown("""
-        **■ オシレーター系（売買のタイミングを図る）**
-        *   **RSI (相対力指数)**: 相場の過熱感を0〜100で表します。（70以上: 買われすぎ / 30以下: 売られすぎ）
-        *   **MACD**: トレンドの方向や転換点を読み取ります。（ゴールデンクロス: 買いサイン / デッドクロス: 売りサイン）
-        **■ トレンド・ファンダメンタルズ系**
-        *   **PER (株価収益率)**: 15倍以下が割安の目安。
-        *   **PBR (株価純資産倍率)**: 資産に対して割安か。日本株では**「1倍割れ」**が東証改善要請のターゲットになりやすく大注目です。
-        *   **ROE (自己資本利益率)**: 稼ぐ効率の良さ。10〜15%以上が優良。
-        *   **配当利回り**: 日本株では3%〜4%以上が高配当の目安とされ、下値支持線として機能しやすいです。
-        """)
-    
     col_scr1, col_scr2 = st.columns([4, 2])
     with col_scr1:
-        if is_us:
-            budget_jpy_man = st.number_input("💰 今回の投資予定資金（万円）を入力", min_value=10, max_value=5000, value=100, step=10, key="budget_input_us")
-        else:
-            budget_jpy_man = st.number_input("💰 今回の投資予定資金（万円）を入力", min_value=10, max_value=5000, value=50, step=10, key="budget_input_jp")
+        if is_us: budget_jpy_man = st.number_input("💰 今回の投資予定資金（万円）", min_value=10, max_value=5000, value=100, step=10, key="budget_input_us")
+        else: budget_jpy_man = st.number_input("💰 今回の投資予定資金（万円）", min_value=10, max_value=5000, value=50, step=10, key="budget_input_jp")
         budget_jpy = budget_jpy_man * 10_000
 
     with col_scr2:
@@ -321,10 +288,11 @@ with tab1:
                 st.session_state.screener_indicators = new_list; st.rerun()
             if st.session_state.screener_indicators:
                 sorted_inds = sort_items(st.session_state.screener_indicators, key="scr_sort_dd")
-                if sorted_inds != st.session_state.screener_indicators:
-                    st.session_state.screener_indicators = sorted_inds; st.rerun()
+                if sorted_inds != st.session_state.screener_indicators: st.session_state.screener_indicators = sorted_inds; st.rerun()
 
     if st.button(f"🚀 {market_mode.split(' ')[0]}の厳選チャンス銘柄をスクリーニング"):
+        st.session_state.last_screened_data = [] # 🌟 新しい検索で履歴をリセット
+        
         with st.spinner(f'{market_mode}から厳しい条件に合う銘柄を抽出中...'):
             try: usd_jpy = yf.Ticker("JPY=X").history(period="1d")['Close'].iloc[-1]
             except: usd_jpy = 150.0 
@@ -336,52 +304,35 @@ with tab1:
                 budget_target = budget_jpy
                 st.info(f"💡 予定資金: **¥{budget_target:,.0f}**")
 
-            # 🌟 データ取得列に SMA200（200日移動平均線）を強制追加
             query_cols = ['name', 'description', 'close', 'Perf.W', 'market_cap_basic', 'volume', 'RSI', 'MACD.macd', 'MACD.signal', 'SMA200']
             for ind in st.session_state.screener_indicators:
                 cols = INDICATOR_MAP[ind]["cols"]; query_cols.extend(cols)
             query_cols = list(set(query_cols))
             
             if is_us:
-                min_mcap = 10_000_000_000  
-                max_mcap = 10_000_000_000_000 
-                min_vol = 2_000_000
-                max_price = budget_target  
+                min_mcap = 10_000_000_000; max_mcap = 10_000_000_000_000; min_vol = 2_000_000; max_price = budget_target  
             else:
-                min_mcap = 30_000_000_000  
-                max_mcap = 1_000_000_000_000  
-                min_vol = 300_000
-                max_price = budget_target / 100  
+                min_mcap = 30_000_000_000; max_mcap = 1_000_000_000_000; min_vol = 300_000; max_price = budget_target / 100  
             
-            # 🌟 今回のAI学習ポイント！ 長期トレンド（SMA200）が上向きの銘柄だけを抽出
             conditions = [
-                Column('market_cap_basic') > min_mcap,
-                Column('market_cap_basic') < max_mcap,  
-                Column('volume') > min_vol,
-                Column('price_earnings_ttm') > 0,
-                Column('RSI') < 40,
-                Column('close') <= max_price,
-                Column('close') > Column('SMA200') # ← 長期トレンドが上向き（現在値が200日線を上回っている）
+                Column('market_cap_basic') > min_mcap, Column('market_cap_basic') < max_mcap,  
+                Column('volume') > min_vol, Column('price_earnings_ttm') > 0, Column('RSI') < 40,
+                Column('close') <= max_price, Column('close') > Column('SMA200')
             ]
                 
             q = (Query().select(*query_cols).where(*conditions).order_by('market_cap_basic', ascending=False).limit(10))
-            
             try: df = q.set_markets(market_name_tv).get_scanner_data()[1]
-            except Exception: df = pd.DataFrame()
+            except: df = pd.DataFrame()
             
             if not df.empty:
                 st.success(f"🎯 厳格なスクリーニングを通過した銘柄です！")
                 
                 for index, row in df.iterrows():
-                    if is_us: 
-                        sym_name = row['name']
+                    if is_us: sym_name = row['name']
                     else:
-                        raw_name = row['name']
-                        desc_en = row.get('description', '')
-                        try:
-                            desc_ja = GoogleTranslator(source='en', target='ja').translate(desc_en) if desc_en else ''
-                        except:
-                            desc_ja = desc_en
+                        raw_name = row['name']; desc_en = row.get('description', '')
+                        try: desc_ja = GoogleTranslator(source='en', target='ja').translate(desc_en) if desc_en else ''
+                        except: desc_ja = desc_en
                         sym_name = f"{raw_name}.T {desc_ja}"
                         
                     curr_price = row.get('close', 1)
@@ -391,70 +342,92 @@ with tab1:
                     is_golden_cross = (macd > sig) if pd.notna(macd) and pd.notna(sig) else False
                         
                     if is_golden_cross:
+                        conv_type = "本気買い"
                         conviction_title = "🔥 本気買い（フル・エントリー）"
                         alloc_pct = 1.0
-                        strategy_msg = "長期トレンド（200日線）が上向きの中で、MACDのゴールデンクロスが確認されました。非常に勝率の高い「絶好の押し目買い」のタイミングです。"
+                        strategy_msg = "長期トレンド（200日線）が上向きの中で、MACDのゴールデンクロスが確認されました。絶好の押し目買いのタイミングです。"
                     else:
+                        conv_type = "打診買い"
                         conviction_title = "💧 打診買い（テスト・エントリー）"
                         alloc_pct = 0.3
-                        strategy_msg = "長期トレンドは上向きでRSIも割安ですが、MACDがまだ下落を示しています。底探りの段階のため、まずは予定資金の30%程度で入り、反発を確認してから買い増すのが安全です。"
+                        strategy_msg = "長期トレンドは上向きでRSIも割安ですが、MACDがまだ下落を示しています。底探りの段階です。"
 
-                    # シミュレーション計算
                     alloc_target = budget_target * alloc_pct
                     if is_us: shares_to_buy = int(alloc_target / curr_price)
                     else:
                         shares_to_buy = int((alloc_target / curr_price) // 100) * 100
                         if shares_to_buy == 0: shares_to_buy = 100 
                         
-                    actual_cost = shares_to_buy * curr_price
-                    actual_cost_jpy = actual_cost * usd_jpy if is_us else actual_cost
+                    st.error(f"**{conviction_title}**\n\n**推奨購入目安:** 約 {shares_to_buy:,} 株\n\n*{strategy_msg}*")
                     
-                    st.error(f"**{conviction_title}**\n\n**推奨購入目安:** 約 {shares_to_buy:,} 株 （投入資金: 約 ¥{actual_cost_jpy:,.0f}）\n\n*{strategy_msg}*")
-                    
+                    # 🌟 履歴保存用のデータを生成
+                    rsi_val = row.get('RSI')
+                    st.session_state.last_screened_data.append([
+                        now_jst.strftime('%Y/%m/%d'),
+                        market_mode.split(' ')[0],
+                        sym_name,
+                        round(curr_price, 2),
+                        conv_type,
+                        shares_to_buy,
+                        round(rsi_val, 1) if pd.notna(rsi_val) else "",
+                        round(macd, 2) if pd.notna(macd) else ""
+                    ])
+
                     metrics_strs = []; reasons = []
                     perf_w = row.get('Perf.W')
                     if pd.notna(perf_w): metrics_strs.append(f"前週比: {perf_w:.1f}%")
-                    
                     for ind in st.session_state.screener_indicators:
                         if ind == "RSI (14日)":
-                            val = row.get('RSI')
-                            if pd.notna(val): metrics_strs.append(f"RSI: {val:.1f}")
+                            if pd.notna(rsi_val): metrics_strs.append(f"RSI: {rsi_val:.1f}")
                         elif ind == "MACD":
                             if pd.notna(macd) and pd.notna(sig): metrics_strs.append(f"MACD: {macd:.2f}")
                         elif ind == "PER (株価収益率)":
                             val = row.get('price_earnings_ttm')
-                            if pd.notna(val):
-                                metrics_strs.append(f"PER: {val:.1f}倍")
-                                if val < 15: reasons.append(f"**PERが{val:.1f}倍**と割安な水準であり、下値不安が限定的です。")
+                            if pd.notna(val): metrics_strs.append(f"PER: {val:.1f}倍")
                         elif ind == "PBR (株価純資産倍率)":
                             val = row.get('price_book_ratio')
-                            if pd.notna(val):
-                                metrics_strs.append(f"PBR: {val:.2f}倍")
-                                if val < 1.0:
-                                    if not is_us: reasons.append(f"**PBRが{val:.2f}倍**と1倍を割れています。日本株特有の「東証からの改善要請」による自社株買いや増配など、バリュー株としての見直し買いが強く期待できる激アツ水準です。")
-                                    else: reasons.append(f"**PBRが{val:.2f}倍**と「1倍割れ」の超割安水準に放置されています。")
+                            if pd.notna(val): metrics_strs.append(f"PBR: {val:.2f}倍")
                         elif ind == "ROE (自己資本利益率)":
                             val = row.get('return_on_equity')
-                            if pd.notna(val):
-                                metrics_strs.append(f"ROE: {val:.1f}%")
-                                if val > 10: reasons.append(f"**ROEが{val:.1f}%**で、効率よく利益を稼ぐ優良企業です。")
+                            if pd.notna(val): metrics_strs.append(f"ROE: {val:.1f}%")
                         elif "SMA" in ind:
                             col_name = INDICATOR_MAP[ind]["cols"][0]
                             val = row.get(col_name)
-                            if pd.notna(val) and pd.notna(curr_price):
-                                metrics_strs.append(f"{ind.split(' ')[0]}: {curr_sym}{val:,.2f}")
-                                if curr_price > val: reasons.append(f"現在値が{ind}（{curr_sym}{val:,.2f}）を**上回って推移**しており、中長期のトレンドは上向きです。")
+                            if pd.notna(val) and pd.notna(curr_price): metrics_strs.append(f"{ind.split(' ')[0]}: {curr_sym}{val:,.2f}")
                         elif ind == "配当利回り(%)":
                             val = row.get('dividend_yield_recent')
-                            if pd.notna(val):
-                                metrics_strs.append(f"配当利回り: {val:.2f}%")
-                                if val > 3.0: reasons.append(f"**配当利回りが{val:.2f}%**と高く、保有中のインカムゲインも魅力的です。")
+                            if pd.notna(val): metrics_strs.append(f"配当利回り: {val:.2f}%")
 
                     st.markdown(f"- **取得データ:** " + " ｜ ".join(metrics_strs))
-                    if reasons: st.info("💡 **その他のファンダメンタル分析:**\n\n" + "\n".join([f"- {r}" for r in reasons]))
                     st.divider()
             else:
-                st.warning("現在、厳しい条件（現在値が200日移動平均線を上回っている、かつRSI40未満など）を満たす銘柄は見つかりませんでした。\n相場全体が過熱しているか、長期トレンドが崩れた危険な銘柄しかない状態です。無駄なトレードを避け、資金を温存して静観を推奨します。")
+                st.warning("現在、厳しい条件を満たす銘柄は見つかりませんでした。\n無駄なトレードを避け、資金を温存して静観を推奨します。")
+
+    # 🌟 結果が出ている場合のみ「保存ボタン」を表示
+    if st.session_state.last_screened_data:
+        st.write("")
+        if st.button("💾 このスクリーニング結果をスプレッドシートに保存（学習用）", type="primary"):
+            with st.spinner("データを保存中..."):
+                try:
+                    creds_json = json.loads(st.secrets["google_sheets_creds"])
+                    scopes = ['https://www.googleapis.com/auth/spreadsheets']
+                    client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
+                    sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0")
+                    
+                    # 🌟 「スクリーニング履歴」タブがなければ自動で作成する安全設計
+                    try:
+                        ws = sheet.worksheet("スクリーニング履歴")
+                    except gspread.exceptions.WorksheetNotFound:
+                        ws = sheet.add_worksheet(title="スクリーニング履歴", rows="1000", cols="10")
+                        ws.append_row(["取得日付", "市場", "ティッカー", "現在値", "判定", "推奨購入株数", "RSI", "MACD"])
+
+                    for row in st.session_state.last_screened_data:
+                        ws.append_row(row)
+                    
+                    st.success("✅ スプレッドシートの「スクリーニング履歴」タブに保存しました！月末のAIコンサルにご活用ください。")
+                    st.session_state.last_screened_data = [] # 保存後はメモリをクリア
+                except Exception as e:
+                    st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
 # タブ2＆3：トラッカー・ニュース
@@ -475,7 +448,6 @@ with tab2:
     if st.button("🎯 最新データを取得 ＆ シートに仮想売買を記録"):
         with st.spinner('データを取得・計算し、スプレッドシートに記録中...'):
             data_list = []; rows_to_append = []
-            now_jst = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y/%m/%d %H:%M')
             for sym in watch_list:
                 disp_name = get_company_name(sym)
                 hist = pd.DataFrame()
@@ -505,7 +477,7 @@ with tab2:
                         else: signal = f"⚪️【静観】RSIが{rsi_val:.1f}で中立圏。次の波を待つ局面です。"
                         
                     data_list.append({'ティッカー': disp_name, '現在値': close, '日足RSI': rsi_val, '週足パフォーマンス(%)': perf_w, '💡 AI判定': signal})
-                    rows_to_append.append([now_jst, sym, round(close, 2), round(rsi_val, 1), round(macd_val, 2), round(perf_w, 1) if pd.notna(perf_w) else "", signal])
+                    rows_to_append.append([now_jst.strftime('%Y/%m/%d %H:%M'), sym, round(close, 2), round(rsi_val, 1), round(macd_val, 2), round(perf_w, 1) if pd.notna(perf_w) else "", signal])
                 except Exception as e: pass
             
             if rows_to_append:
@@ -555,17 +527,10 @@ with tab3:
                         with urllib.request.urlopen(req) as response: xml_data = response.read()
                         root = ET.fromstring(xml_data); items = root.findall('.//item')
                         if items:
-                            for item in items[:3]:
-                                title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
-                                link = item.find('link').text if item.find('link') is not None else '#'
-                                pub = item.find('source').text if item.find('source') is not None else '配信元不明'
-                                dt = "時刻不明"
-                                pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
-                                if pub_date_str:
-                                    t_tuple = email.utils.parsedate_tz(pub_date_str)
-                                    if t_tuple: dt = (datetime.utcfromtimestamp(email.utils.mktime_tz(t_tuple)) + timedelta(hours=9)).strftime('%Y/%m/%d %H:%M')
-                                st.markdown(f"**[{title}]({link})**")
-                                st.caption(f"🏢 {pub}  |  🕒 {dt}")
+                            for item in items[:3]: display_news_item(item)
+                            if len(items) > 3:
+                                with st.expander(f"🔽 {disp_name} のその他のニュースを見る"):
+                                    for item in items[3:10]: display_news_item(item); st.write("") 
                         else: st.info("ニュースは見つかりませんでした。")
                     except Exception as e: st.error("ニュース取得中にエラーが発生しました。")
                     st.divider()
