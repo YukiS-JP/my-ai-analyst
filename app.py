@@ -42,11 +42,17 @@ if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = {}
 if 'company_names' not in st.session_state: st.session_state.company_names = {} 
 if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] 
 if 'saved_dates' not in st.session_state: st.session_state.saved_dates = {'🇺🇸 米国市場 (US)': None, '🇯🇵 日本市場 (JP)': None} 
+
+# 🌟 トラッカー用のメモリを新規追加
+if 'last_tracker_data' not in st.session_state: st.session_state.last_tracker_data = []
+if 'tracker_saved_dates' not in st.session_state: st.session_state.tracker_saved_dates = {'🇺🇸 米国市場 (US)': None, '🇯🇵 日本市場 (JP)': None}
+
 if 'current_market_mode' not in st.session_state: st.session_state.current_market_mode = market_mode
 
-# 🌟 市場を切り替えたら、表示中のスクリーニングデータをリセット
+# 🌟 市場を切り替えたら、表示中のスクリーニング・トラッカーデータをリセット
 if st.session_state.current_market_mode != market_mode:
     st.session_state.last_screened_data = []
+    st.session_state.last_tracker_data = []
     st.session_state.current_market_mode = market_mode
 
 watch_list_key = 'watch_list_us' if is_us else 'watch_list_jp'
@@ -250,7 +256,8 @@ with tab_top:
                         delta = hist['Close'].diff()
                         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
                         loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-                        rs = gain / loss; rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
+                        rs = gain / loss
+                        rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                         
                         if day_diff > 0: d_trend = f"<span class='val-up'>↑+{day_diff:,.2f} (+{day_pct:.2f}%)</span>"
                         elif day_diff < 0: d_trend = f"<span class='val-down'>↓{day_diff:,.2f} ({day_pct:.2f}%)</span>"
@@ -407,7 +414,7 @@ with tab1:
     if st.session_state.last_screened_data:
         st.write("")
         if st.session_state.saved_dates[market_mode] == current_market_date:
-            st.success(f"✅ 本日（{current_market_date}）の {market_mode.split(' ')[0]} のスクリーニングデータは保存済みです！\n二重保存（AIの学習ノイズ）を防ぐため、ボタンを非表示にしています。明日の相場更新をお待ちください。")
+            st.success(f"✅ 本日（{current_market_date}）の {market_mode.split(' ')[0]} のスクリーニングデータは保存済みです！\n二重保存を防ぐため、記録ボタンを非表示にしています。明日の相場更新をお待ちください。")
         else:
             if st.button("💾 このスクリーニング結果をスプレッドシートに保存（学習用）", type="primary", key=f"scr_save_btn_{is_us}"):
                 with st.spinner("データを保存中..."):
@@ -429,10 +436,10 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# タブ2＆3：トラッカー・ニュース
+# 🌟 タブ2：個別銘柄トラッカー（二重記録防止 ＆ UI分離対応）
 # ==========================================
 with tab2:
-    st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに自動記録**します。")
+    st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
     col1, col2 = st.columns([3, 1])
     with col1: new_ticker = st.text_input(f"➕ 新しい銘柄を追加{ticker_suffix_hint}", key=f"t2_add_{is_us}")
     with col2:
@@ -444,9 +451,10 @@ with tab2:
     selected = st.multiselect("📝 現在の監視リスト", options=watch_list, default=watch_list, key=f"t2_select_{is_us}")
     if selected != watch_list: st.session_state[watch_list_key] = selected; st.rerun()
 
-    if st.button("🎯 最新データを取得 ＆ シートに仮想売買を記録", key=f"t2_record_btn_{is_us}"):
-        with st.spinner('データを取得・計算し、スプレッドシートに記録中...'):
-            data_list = []; rows_to_append = []
+    # 🌟 ボタンを「取得」と「記録」で分離しました！
+    if st.button("🎯 最新データを取得してAI判定を実行", key=f"t2_fetch_btn_{is_us}"):
+        with st.spinner('データを取得・計算中...'):
+            st.session_state.last_tracker_data = [] # 取得のたびに一旦リセット
             for sym in watch_list:
                 disp_name = get_company_name(sym)
                 hist = pd.DataFrame()
@@ -475,26 +483,55 @@ with tab2:
                         elif macd_val > sig_val: signal = f"⚪️【静観】MACDは上向きですが、RSIが割安基準に達していません。"
                         else: signal = f"⚪️【静観】RSIが{rsi_val:.1f}で中立圏。次の波を待つ局面です。"
                         
-                    data_list.append({'ティッカー': disp_name, '現在値': close, '日足RSI': rsi_val, '週足パフォーマンス(%)': perf_w, '💡 AI判定': signal})
-                    rows_to_append.append([now_jst.strftime('%Y/%m/%d %H:%M'), sym, round(close, 2), round(rsi_val, 1), round(macd_val, 2), round(perf_w, 1) if pd.notna(perf_w) else "", signal])
+                    st.session_state.last_tracker_data.append({
+                        'ティッカー': disp_name, 'sym': sym, '現在値': close, '日足RSI': rsi_val, 
+                        'MACD': macd_val, '週足パフォーマンス(%)': perf_w, '💡 AI判定': signal
+                    })
                 except Exception as e: pass
-            
-            if rows_to_append:
-                try:
-                    creds_json = json.loads(st.secrets["google_sheets_creds"])
-                    scopes = ['https://www.googleapis.com/auth/spreadsheets']
-                    client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
-                    sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0").sheet1
-                    for row in rows_to_append: sheet.append_row(row)
-                    st.success("✅ データ取得 ＆ スプレッドシートへの記録が完了しました！")
-                except Exception as e: st.error(f"⚠️ スプレッドシートへの記録に失敗しました: {e}")
-            
-            if data_list:
-                for data in data_list:
-                    st.markdown(f"### 📌 {data['ティッカー']} (現在値: {curr_sym}{data['現在値']:,.2f})")
-                    st.markdown(f"- **日足RSI:** {data['日足RSI']:.1f}  |  **週足パフォーマンス:** {data['週足パフォーマンス(%)']:.1f}%")
-                    st.info(f"**{data['💡 AI判定']}**"); st.divider()
 
+    # 🌟 取得した結果を表示し、保存ボタンを出す
+    if st.session_state.last_tracker_data:
+        for data in st.session_state.last_tracker_data:
+            st.markdown(f"### 📌 {data['ティッカー']} (現在値: {curr_sym}{data['現在値']:,.2f})")
+            st.markdown(f"- **日足RSI:** {data['日足RSI']:.1f}  |  **週足パフォーマンス:** {data['週足パフォーマンス(%)']:.1f}%")
+            st.info(f"**{data['💡 AI判定']}**"); st.divider()
+
+        st.write("")
+        if st.session_state.tracker_saved_dates[market_mode] == current_market_date:
+            st.success(f"✅ 本日（{current_market_date}）の {market_mode.split(' ')[0]} のトラッカー記録は保存済みです！二重保存を防ぐため、記録ボタンを非表示にしています。")
+        else:
+            if st.button("💾 この判定結果をスプレッドシートに記録", type="primary", key=f"t2_save_btn_{is_us}"):
+                with st.spinner("スプレッドシートに記録中..."):
+                    try:
+                        creds_json = json.loads(st.secrets["google_sheets_creds"])
+                        scopes = ['https://www.googleapis.com/auth/spreadsheets']
+                        client = gspread.authorize(Credentials.from_service_account_info(creds_json, scopes=scopes))
+                        sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1IMUxpioGHLPLcLlxXaVR7IYFIltIkkt4muvByDo-LI8/edit?gid=0#gid=0").sheet1
+                        
+                        for data in st.session_state.last_tracker_data:
+                            row = [
+                                now_jst.strftime('%Y/%m/%d %H:%M'), 
+                                data['sym'], 
+                                round(data['現在値'], 2), 
+                                round(data['日足RSI'], 1), 
+                                round(data['MACD'], 2), 
+                                round(data['週足パフォーマンス(%)'], 1) if pd.notna(data['週足パフォーマンス(%)']) else "", 
+                                data['💡 AI判定']
+                            ]
+                            sheet.append_row(row)
+                        
+                        # 保存日をメモリに記録し、データをクリア
+                        st.session_state.tracker_saved_dates[market_mode] = current_market_date
+                        st.session_state.last_tracker_data = [] 
+                        
+                        st.success("✅ スプレッドシートへの記録が完了しました！")
+                        time.sleep(1.5)
+                        st.rerun()
+                    except Exception as e: st.error(f"⚠️ スプレッドシートへの記録に失敗しました: {e}")
+
+# ==========================================
+# タブ3：ニュース
+# ==========================================
 with tab3:
     st.write("監視中の**全銘柄**に関連する最新ニュースを一覧でチェックできます。")
     if watch_list:
