@@ -4,3 +4,4 @@ tradingview-screener
 yfinance
 gspread
 google-auth
+streamlit-sortables
