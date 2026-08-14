@@ -245,7 +245,7 @@ with tab2:
                     st.divider()
 
 # ==========================================
-# タブ3：最新ニュース（全銘柄一括取得版）
+# タブ3：最新ニュース（折りたたみ「もっと見る」機能付き）
 # ==========================================
 with tab3:
     st.write("監視中の**全銘柄**に関連する最新ニュースを一覧でチェックできます。")
@@ -253,6 +253,26 @@ with tab3:
     if 'watch_list' in st.session_state and st.session_state.watch_list:
         if st.button("📰 監視リストの最新ニュースを一括取得"):
             with st.spinner('全銘柄のニュースを検索中...'):
+                
+                # ニュースを表示するための共通関数
+                def display_news_item(item):
+                    title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
+                    link = item.find('link').text if item.find('link') is not None else '#'
+                    source_elem = item.find('source')
+                    publisher = source_elem.text if source_elem is not None else '配信元不明'
+                    pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
+                    dt = "時刻不明"
+                    
+                    if pub_date_str:
+                        time_tuple = email.utils.parsedate_tz(pub_date_str)
+                        if time_tuple:
+                            timestamp = email.utils.mktime_tz(time_tuple)
+                            dt_obj = datetime.utcfromtimestamp(timestamp) + timedelta(hours=9)
+                            dt = dt_obj.strftime('%Y/%m/%d %H:%M')
+                            
+                    st.markdown(f"**[{title}]({link})**")
+                    st.caption(f"🏢 {publisher}  |  🕒 {dt}")
+
                 for news_target in st.session_state.watch_list:
                     st.markdown(f"### 📌 {news_target} のニュース")
                     try:
@@ -266,26 +286,16 @@ with tab3:
                         items = root.findall('.//item')
                         
                         if items:
-                            # 縦長になりすぎないように各銘柄3件までに制限
+                            # 最初の3件は常に表示
                             for item in items[:3]:
-                                title = item.find('title').text if item.find('title') is not None else 'タイトルなし'
-                                link = item.find('link').text if item.find('link') is not None else '#'
-                                
-                                source_elem = item.find('source')
-                                publisher = source_elem.text if source_elem is not None else '配信元不明'
-                                
-                                pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
-                                dt = "時刻不明"
-                                
-                                if pub_date_str:
-                                    time_tuple = email.utils.parsedate_tz(pub_date_str)
-                                    if time_tuple:
-                                        timestamp = email.utils.mktime_tz(time_tuple)
-                                        dt_obj = datetime.utcfromtimestamp(timestamp) + timedelta(hours=9)
-                                        dt = dt_obj.strftime('%Y/%m/%d %H:%M')
-                                        
-                                st.markdown(f"**[{title}]({link})**")
-                                st.caption(f"🏢 配信元: {publisher}  |  🕒 配信日時: {dt}")
+                                display_news_item(item)
+                            
+                            # 4件目以降がある場合は「もっと見る」の中に格納（最大10件まで）
+                            if len(items) > 3:
+                                with st.expander(f"🔽 {news_target} のその他のニュースを見る"):
+                                    for item in items[3:10]:
+                                        display_news_item(item)
+                                        st.write("") # 少し余白をあける
                         else:
                             st.info(f"{news_target} に関連する最新ニュースは見つかりませんでした。")
                     except Exception as e:
