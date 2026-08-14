@@ -306,6 +306,7 @@ with tab_top:
                     c_price = h['Close'].iloc[-1]; p_price = h['Close'].iloc[-2]; diff = c_price - p_price; pct = (diff / p_price) * 100
                     if diff > 0: trend_html = f"<span class='val-up'>↑+{diff:,.2f} (+{pct:.2f}%)</span>"
                     elif diff < 0: trend_html = f"<span class='val-down'>↓{diff:,.2f} ({pct:.2f}%)</span>"
+                    # 🌟 修正箇所：タイポを直しました
                     else: trend_html = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
                     val_str = f"¥{c_price:.2f}" if "JPY" in symbol or "円" in name else f"{c_price:,.2f}"
                     html_macro += f"<div class='item-row'><strong>{name}</strong>: {val_str} ({trend_html})</div>"
@@ -360,7 +361,8 @@ with tab_top:
                         
                         if day_diff > 0: d_trend = f"<span class='val-up'>↑+{day_diff:,.2f} (+{day_pct:.2f}%)</span>"
                         elif day_diff < 0: d_trend = f"<span class='val-down'>↓{day_diff:,.2f} ({day_pct:.2f}%)</span>"
-                        else: d_trend = fspan class='val-neutral'>±0.00 (0.00%)</span>"
+                        # 🌟 修正箇所：タイポを直しました
+                        else: d_trend = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
                         if rsi_val >= 70: rsi_stat = "<span class='val-down'>🔴 過熱</span>"
                         elif rsi_val <= 45: rsi_stat = "<span class='val-up'>🟢 割安</span>"
                         else: rsi_stat = "<span class='val-neutral'>⚪️ 中立</span>"
@@ -570,7 +572,6 @@ with tab2:
         watch_list = update_watchlist(new_w_list) 
         st.rerun()
 
-    # 🌟 バグ修正: expander をやめて popover (クリックで開くメニュー) に変更しました！
     if len(watch_list) > 1:
         with st.popover("↕️ リストの並び替え（ドラッグ＆ドロップ）"):
             st.markdown("**ドラッグ＆ドロップで順番を変更できます**")
@@ -584,7 +585,7 @@ with tab2:
     
     auto_fetch = (st.session_state[f"last_fetched_wl_{is_us}"] != watch_list)
 
-    if st.button("🔄 最新の株価・AI判定に更新（手動リロード）", key=f"t2_fetch_btn_{is_us}") or auto_fetch:
+    if st.button("🔄 最新の株価・AI判定に更新（手持リロード）", key=f"t2_fetch_btn_{is_us}") or auto_fetch:
         with st.spinner('データを取得・計算中...'):
             st.session_state[tracker_data_key] = [] 
             for sym in watch_list:
