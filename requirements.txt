@@ -5,3 +5,4 @@ yfinance
 gspread
 google-auth
 streamlit-sortables
+deep-translator
