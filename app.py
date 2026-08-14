@@ -17,8 +17,24 @@ st.set_page_config(page_title="AIアナリスト", page_icon="📊", layout="wid
 
 st.title("📊 My AI Analyst Dashboard")
 
+# --- セッションステート（初期設定） ---
 if 'watch_list' not in st.session_state:
     st.session_state.watch_list = ["SOXL", "RDW", "DNA", "FNGU"]
+if 'macro_list' not in st.session_state:
+    st.session_state.macro_list = ["米ドル/円", "S&P 500", "NASDAQ", "日経平均"]
+
+# 追加できるマクロ指標のリスト
+AVAILABLE_MACROS = {
+    "米ドル/円": "JPY=X",
+    "S&P 500": "^GSPC",
+    "NASDAQ": "^IXIC",
+    "日経平均": "^N225",
+    "NYダウ": "^DJI",
+    "米国10年債利回り": "^TNX",
+    "ゴールド(金)": "GC=F",
+    "原油(WTI)": "CL=F",
+    "VIX恐怖指数": "^VIX"
+}
 
 # ------------------------------------------------
 # AIによる「ステータス判定・選定理由」を生成する関数
@@ -68,107 +84,150 @@ def generate_reason(row):
 tab_top, tab1, tab2, tab3 = st.tabs(["🏠 トップ", "🔍 スクリーニング", "🎯 トラッカー", "📰 ニュース"])
 
 # ==========================================
-# 🌟 トップ（スマホ最適化・テキストベース一覧）
+# 🌟 トップ（電光掲示板風サマリー ＆ 折りたたみチャート）
 # ==========================================
 with tab_top:
-    st.subheader("🌐 主要市場サマリー（為替・全体指数）")
     
-    macro_tickers = {
-        "米ドル/円": "JPY=X",
-        "S&P 500": "^GSPC",
-        "NASDAQ": "^IXIC",
-        "日経平均": "^N225"
-    }
+    # ⚙️ 表示設定アコーディオン（並び替え・追加編集用）
+    with st.expander("⚙️ 司令塔の表示設定（指標・銘柄の追加と並び替え）", expanded=False):
+        st.markdown("ここで選んだ項目が、そのままの順番で下の黒いパネルに表示されます。選択肢の「×」を押して消したり、リストから新しく追加したりできます。")
+        
+        selected_macros = st.multiselect(
+            "🌍 表示する市場指標を選択",
+            options=list(AVAILABLE_MACROS.keys()),
+            default=st.session_state.macro_list
+        )
+        if selected_macros != st.session_state.macro_list:
+            st.session_state.macro_list = selected_macros
+            st.rerun()
+            
+        selected_charts = st.multiselect(
+            "📌 表示する監視銘柄を選択",
+            options=st.session_state.watch_list,
+            default=st.session_state.watch_list
+        )
+        
+    st.write("") # 少し余白
     
-    # パネル表示をやめて、スマホでも綺麗に折り返されるテキストリストに変更
-    for name, symbol in macro_tickers.items():
-        try:
-            t = yf.Ticker(symbol)
-            h = t.history(period="5d")
-            if not h.empty and len(h) >= 2:
-                c_price = h['Close'].iloc[-1]
-                p_price = h['Close'].iloc[-2]
-                diff = c_price - p_price
-                pct = (diff / p_price) * 100
+    # ⬛ ここから黒背景デザインのHTML生成処理
+    with st.spinner("最新の市場データを取得中..."):
+        
+        html_style = """
+        <style>
+            .dashboard-panel {
+                background-color: #12141A;
+                padding: 20px;
+                border-radius: 12px;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+                border: 1px solid #2D303E;
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            }
+            .panel-header { color: #82B1FF; margin-top: 0; margin-bottom: 12px; font-size: 18px; border-bottom: 1px solid #2D303E; padding-bottom: 8px;}
+            .panel-sub-header { color: #B39DDB; margin-top: 20px; margin-bottom: 12px; font-size: 18px; border-bottom: 1px solid #2D303E; padding-bottom: 8px;}
+            .item-row { margin: 8px 0; color: #EEEEEE; font-size: 15px;}
+            .item-sub-row { margin: 2px 0 12px 18px; color: #BBBBBB; font-size: 14px; line-height: 1.5;}
+            .val-up { color: #00E676; font-weight: bold;}
+            .val-down { color: #FF5252; font-weight: bold;}
+            .val-neutral { color: #9E9E9E;}
+            .sym-title { font-weight: bold; font-size: 16px; color: #FFFFFF;}
+        </style>
+        <div class="dashboard-panel">
+            <div class="panel-header">🌍 主要市場サマリー</div>
+        """
+        
+        # マクロ指標のデータ取得とHTML追加
+        for name in st.session_state.macro_list:
+            symbol = AVAILABLE_MACROS[name]
+            try:
+                t = yf.Ticker(symbol)
+                h = t.history(period="5d")
+                if not h.empty and len(h) >= 2:
+                    c_price = h['Close'].iloc[-1]
+                    p_price = h['Close'].iloc[-2]
+                    diff = c_price - p_price
+                    pct = (diff / p_price) * 100
+                    
+                    if diff > 0:
+                        trend_html = f"<span class='val-up'>↑+{diff:,.2f} (+{pct:.2f}%)</span>"
+                    elif diff < 0:
+                        trend_html = f"<span class='val-down'>↓{diff:,.2f} ({pct:.2f}%)</span>"
+                    else:
+                        trend_html = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
+                        
+                    if symbol == "JPY=X":
+                        val_str = f"¥{c_price:.2f}"
+                    else:
+                        val_str = f"{c_price:,.2f}"
+                        
+                    html_style += f"<div class='item-row'><strong>{name}</strong>: {val_str} ({trend_html})</div>"
+                else:
+                    html_style += f"<div class='item-row'><strong>{name}</strong>: 取得失敗</div>"
+            except:
+                html_style += f"<div class='item-row'><strong>{name}</strong>: エラー</div>"
                 
-                if diff > 0:
-                    trend = f"🟢 ↑+{diff:,.2f} (+{pct:.2f}%)"
-                elif diff < 0:
-                    trend = f"🔴 ↓{diff:,.2f} ({pct:.2f}%)"
-                else:
-                    trend = "⚪️ ±0.00 (0.00%)"
+        html_style += "<div class='panel-sub-header'>📌 監視銘柄 データ一覧</div>"
+        
+        # 監視銘柄のデータ取得とHTML追加
+        if selected_charts:
+            for sym in selected_charts:
+                try:
+                    ticker = yf.Ticker(sym)
+                    hist = ticker.history(period="1y")
                     
-                if symbol == "JPY=X":
-                    val_str = f"¥{c_price:.2f}"
-                else:
-                    val_str = f"{c_price:,.2f}"
-                    
-                st.markdown(f"**{name}** {val_str} （{trend}）")
-            else:
-                st.markdown(f"**{name}** 取得失敗")
-        except Exception:
-            st.markdown(f"**{name}** エラー")
+                    if not hist.empty and len(hist) > 22:
+                        curr_p = hist['Close'].iloc[-1]
+                        prev_p = hist['Close'].iloc[-2]
+                        day_diff = curr_p - prev_p
+                        day_pct = (day_diff / prev_p) * 100
 
-    st.divider()
+                        month_p = hist['Close'].iloc[-22]
+                        month_pct = ((curr_p - month_p) / month_p) * 100
+
+                        high_52 = hist['High'].max()
+                        dd_52 = ((curr_p - high_52) / high_52) * 100
+
+                        delta = hist['Close'].diff()
+                        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                        rs = gain / loss
+                        rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
+                        
+                        if day_diff > 0:
+                            d_trend = f"<span class='val-up'>↑+{day_diff:.2f} (+{day_pct:.2f}%)</span>"
+                        elif day_diff < 0:
+                            d_trend = f"<span class='val-down'>↓{day_diff:.2f} ({day_pct:.2f}%)</span>"
+                        else:
+                            d_trend = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
+
+                        if rsi_val >= 70:
+                            rsi_stat = "<span class='val-down'>🔴 過熱</span>"
+                        elif rsi_val <= 45:
+                            rsi_stat = "<span class='val-up'>🟢 割安</span>"
+                        else:
+                            rsi_stat = "<span class='val-neutral'>⚪️ 中立</span>"
+                            
+                        month_color = 'val-up' if month_pct > 0 else 'val-down' if month_pct < 0 else 'val-neutral'
+                        
+                        html_style += f"<div class='item-row sym-title'>🔹 {sym}</div>"
+                        html_style += f"<div class='item-sub-row'>"
+                        html_style += f"┣ <strong>現在値:</strong> ${curr_p:.2f} ({d_trend})<br>"
+                        html_style += f"┗ <strong>前月比:</strong> <span class='{month_color}'>{month_pct:+.2f}%</span> ｜ <strong>RSI:</strong> {rsi_val:.1f} ({rsi_stat}) ｜ <strong>高値差:</strong> {dd_52:+.1f}%"
+                        html_style += f"</div>"
+                except:
+                    html_style += f"<div class='item-row sym-title'>🔹 {sym}</div><div class='item-sub-row'>データ取得エラー</div>"
+        else:
+            html_style += "<div class='item-row val-neutral'>表示する銘柄が選択されていません。上の設定メニューから選んでください。</div>"
+
+        html_style += "</div>" # パネル終了
+        
+        # 描画
+        st.markdown(html_style, unsafe_allow_html=True)
     
-    st.subheader("📌 監視銘柄 データ一覧 ＆ チャート")
+    st.write("")
     
-    selected_charts = st.multiselect(
-        "表示する銘柄を選択（※並び順も自由に変更可能です）",
-        options=st.session_state.watch_list,
-        default=st.session_state.watch_list
-    )
-    
-    st.write("") 
-    
+    # 📈 詳細チャートセクション（一覧の下に配置）
     if selected_charts:
         for sym in selected_charts:
-            st.markdown(f"### 🔹 {sym}")
-            
-            try:
-                ticker = yf.Ticker(sym)
-                hist = ticker.history(period="1y")
-                
-                if not hist.empty and len(hist) > 22:
-                    curr_p = hist['Close'].iloc[-1]
-                    prev_p = hist['Close'].iloc[-2]
-                    day_diff = curr_p - prev_p
-                    day_pct = (day_diff / prev_p) * 100
-
-                    month_p = hist['Close'].iloc[-22]
-                    month_pct = ((curr_p - month_p) / month_p) * 100
-
-                    high_52 = hist['High'].max()
-                    dd_52 = ((curr_p - high_52) / high_52) * 100
-
-                    delta = hist['Close'].diff()
-                    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-                    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-                    rs = gain / loss
-                    rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
-                    
-                    if day_diff > 0:
-                        d_trend = f"🟢 ↑+{day_diff:.2f} (+{day_pct:.2f}%)"
-                    elif day_diff < 0:
-                        d_trend = f"🔴 ↓{day_diff:.2f} ({day_pct:.2f}%)"
-                    else:
-                        d_trend = "⚪️ ±0.00 (0.00%)"
-
-                    if rsi_val >= 70:
-                        rsi_stat = "🔴 過熱"
-                    elif rsi_val <= 45:
-                        rsi_stat = "🟢 割安"
-                    else:
-                        rsi_stat = "⚪️ 中立"
-                    
-                    # スマホで一目で把握できるようにコンパクトなテキスト2行で表示
-                    st.markdown(f"- **現在値:** ${curr_p:.2f} （{d_trend}）")
-                    st.markdown(f"- **前月比:** {month_pct:+.2f}% ｜ **RSI:** {rsi_val:.1f} ({rsi_stat}) ｜ **高値差:** {dd_52:+.1f}%")
-                    
-            except Exception:
-                st.warning(f"⚠️ {sym} の指標データ取得に失敗しました。")
-
-            # 📈 折りたたみ式TradingViewチャート（タップでスッと開く）
             with st.expander(f"📈 {sym} の詳細チャートを開く / 閉じる"):
                 html_code = f"""
                 <div class="tradingview-widget-container">
@@ -195,10 +254,6 @@ with tab_top:
                 </div>
                 """
                 components.html(html_code, height=400)
-            
-            st.divider()
-    else:
-        st.info("上のメニューから、表示させたい銘柄を選んでください。")
 
 # ==========================================
 # タブ1：全体スクリーニング
