@@ -40,6 +40,23 @@ if 'macro_display_list' not in st.session_state:
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = {}
 
+# 🌟 スクリーニングで表示・分析する指標のリスト
+if 'screener_indicators' not in st.session_state:
+    st.session_state.screener_indicators = ["RSI (14日)", "MACD", "PER (株価収益率)"]
+
+# スクリーニングで利用可能な全指標の定義マップ
+INDICATOR_MAP = {
+    "RSI (14日)": {"cols": ["RSI"]},
+    "MACD": {"cols": ["MACD.macd", "MACD.signal"]},
+    "PER (株価収益率)": {"cols": ["price_earnings_ttm"]},
+    "PBR (株価純資産倍率)": {"cols": ["price_book_ratio"]},
+    "ROE (自己資本利益率)": {"cols": ["return_on_equity"]},
+    "SMA20 (20日移動平均)": {"cols": ["SMA20"]},
+    "SMA50 (50日移動平均)": {"cols": ["SMA50"]},
+    "SMA200 (200日移動平均)": {"cols": ["SMA200"]},
+    "配当利回り(%)": {"cols": ["dividend_yield_recent"]}
+}
+
 # ------------------------------------------------
 # アプリ画面の構築（タブで4画面に分割）
 # ------------------------------------------------
@@ -70,7 +87,6 @@ with tab_top:
         </style>
     """, unsafe_allow_html=True)
 
-    # --- 💼 ポートフォリオ編集 セクション ---
     with st.expander("💼 ポートフォリオの編集（保有銘柄の登録・削除）"):
         st.markdown("**1️⃣ 保有銘柄の登録・更新** (米国株・ETF専用)")
         c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
@@ -105,39 +121,25 @@ with tab_top:
     st.write("")
 
     with st.spinner("最新データを取得中..."):
-        # --- ⬛ 黒背景パネル0（ポートフォリオ） ---
         port_html = "<div class='dashboard-panel'><div class='panel-header'>💼 ポートフォリオ状況</div>"
-        
         if st.session_state.portfolio:
-            total_cost = 0
-            total_value = 0
-            details_html = ""
-            
+            total_cost = 0; total_value = 0; details_html = ""
             for sym, data in st.session_state.portfolio.items():
-                qty = data['qty']
-                avg_p = data['avg_price']
+                qty = data['qty']; avg_p = data['avg_price']
                 try:
                     t = yf.Ticker(sym)
                     h = t.history(period="1d")
                     if not h.empty:
                         c_price = h['Close'].iloc[-1]
-                        
                         cost = avg_p * qty
                         val = c_price * qty
                         pnl = val - cost
                         pnl_pct = (pnl / cost) * 100 if cost > 0 else 0
-                        
-                        total_cost += cost
-                        total_value += val
-                        
+                        total_cost += cost; total_value += val
                         pnl_class = 'val-up' if pnl > 0 else 'val-down' if pnl < 0 else 'val-neutral'
                         sign = '+' if pnl > 0 else ''
-                        
                         details_html += f"<div class='item-row sym-title'>🔹 {sym} <span style='font-size: 13px; color:#888; font-weight:normal;'>({qty:,.2f}株)</span></div>"
-                        details_html += f"<div class='item-sub-row'>"
-                        details_html += f"┣ <strong>評価額:</strong> ${val:,.2f} (現在値: ${c_price:,.2f})<br>"
-                        details_html += f"┗ <strong>含み損益:</strong> <span class='{pnl_class}'>{sign}${pnl:,.2f} ({sign}{pnl_pct:.2f}%)</span> ｜ 取得単価: ${avg_p:,.2f}"
-                        details_html += f"</div>"
+                        details_html += f"<div class='item-sub-row'>┣ <strong>評価額:</strong> ${val:,.2f} (現在値: ${c_price:,.2f})<br>┗ <strong>含み損益:</strong> <span class='{pnl_class}'>{sign}${pnl:,.2f} ({sign}{pnl_pct:.2f}%)</span> ｜ 取得単価: ${avg_p:,.2f}</div>"
                     else:
                         details_html += f"<div class='item-row'>🔹 <strong>{sym}</strong>: データ取得エラー</div>"
                 except:
@@ -154,18 +156,15 @@ with tab_top:
             port_html += details_html
         else:
             port_html += "<div class='item-row val-neutral'>保有銘柄が登録されていません。「💼 ポートフォリオの編集」から追加してください。<br><span style='font-size:12px;'>※現在は米国株・ETF（ドル建て計算）に最適化されています。</span></div>"
-        
         port_html += "</div>"
         st.markdown(port_html, unsafe_allow_html=True)
 
 
-        # --- 🌍 主要市場サマリー セクション ---
         col1, col2 = st.columns([5, 1])
         with col1:
             st.subheader("🌍 主要市場サマリー")
         with col2:
             with st.popover("⚙️ 編集"):
-                st.markdown("**1️⃣ 新しい指標の追加**")
                 new_macro_name = st.text_input("📝 表示名", placeholder="半導体指数", key="mac_name")
                 new_macro_tick = st.text_input("🔤 ティッカー", placeholder="^SOX", key="mac_tick")
                 if st.button("➕ 追加する", key="add_macro_btn"):
@@ -174,32 +173,20 @@ with tab_top:
                         if new_macro_name not in st.session_state.macro_display_list:
                             st.session_state.macro_display_list.append(new_macro_name)
                         st.rerun()
-                
                 st.divider()
-                
-                st.markdown("**2️⃣ 表示と順番の変更**")
-                st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
-                selected_macros = st.multiselect(
-                    "表示する指標",
-                    options=list(st.session_state.macro_dict.keys()),
-                    default=st.session_state.macro_display_list,
-                    key="macro_select"
-                )
+                selected_macros = st.multiselect("表示する指標", options=list(st.session_state.macro_dict.keys()), default=st.session_state.macro_display_list, key="macro_select")
                 if set(selected_macros) != set(st.session_state.macro_display_list):
                     new_list = [m for m in st.session_state.macro_display_list if m in selected_macros]
                     for m in selected_macros:
-                        if m not in new_list:
-                            new_list.append(m)
+                        if m not in new_list: new_list.append(m)
                     st.session_state.macro_display_list = new_list
                     st.rerun()
-
                 if st.session_state.macro_display_list:
                     sorted_macros = sort_items(st.session_state.macro_display_list, key="macro_sort")
                     if sorted_macros != st.session_state.macro_display_list:
                         st.session_state.macro_display_list = sorted_macros
                         st.rerun()
 
-        # 黒背景パネル1（マクロ）
         html_macro = "<div class='dashboard-panel'>"
         for name in st.session_state.macro_display_list:
             symbol = st.session_state.macro_dict.get(name, "")
@@ -207,89 +194,63 @@ with tab_top:
                 t = yf.Ticker(symbol)
                 h = t.history(period="5d")
                 if not h.empty and len(h) >= 2:
-                    c_price = h['Close'].iloc[-1]
-                    p_price = h['Close'].iloc[-2]
-                    diff = c_price - p_price
-                    pct = (diff / p_price) * 100
+                    c_price = h['Close'].iloc[-1]; p_price = h['Close'].iloc[-2]
+                    diff = c_price - p_price; pct = (diff / p_price) * 100
                     
-                    if diff > 0:
-                        trend_html = f"<span class='val-up'>↑+{diff:,.2f} (+{pct:.2f}%)</span>"
-                    elif diff < 0:
-                        trend_html = f"<span class='val-down'>↓{diff:,.2f} ({pct:.2f}%)</span>"
-                    else:
-                        trend_html = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
+                    if diff > 0: trend_html = f"<span class='val-up'>↑+{diff:,.2f} (+{pct:.2f}%)</span>"
+                    elif diff < 0: trend_html = f"<span class='val-down'>↓{diff:,.2f} ({pct:.2f}%)</span>"
+                    else: trend_html = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
                         
-                    if "JPY" in symbol or "円" in name:
-                        val_str = f"¥{c_price:.2f}"
-                    else:
-                        val_str = f"{c_price:,.2f}"
+                    if "JPY" in symbol or "円" in name: val_str = f"¥{c_price:.2f}"
+                    else: val_str = f"{c_price:,.2f}"
                         
                     html_macro += f"<div class='item-row'><strong>{name}</strong>: {val_str} ({trend_html})</div>"
                 else:
-                    html_macro += f"<div class='item-row'><strong>{name}</strong>: 取得失敗 (ティッカーを確認)</div>"
+                    html_macro += f"<div class='item-row'><strong>{name}</strong>: 取得失敗</div>"
             except:
                 html_macro += f"<div class='item-row'><strong>{name}</strong>: エラー</div>"
         html_macro += "</div>"
         st.markdown(html_macro, unsafe_allow_html=True)
 
-
-        # --- 📌 監視銘柄 データ一覧 セクション ---
         col3, col4 = st.columns([5, 1])
         with col3:
             st.subheader("📌 監視銘柄 データ一覧")
         with col4:
             with st.popover("⚙️ 編集"):
-                st.markdown("**1️⃣ 新しい銘柄の追加**")
                 new_watch_tick = st.text_input("🔤 ティッカー", placeholder="NVDA", key="watch_tick")
                 if st.button("➕ 追加する", key="add_watch_btn"):
                     c_tick = new_watch_tick.strip().upper()
                     if c_tick and c_tick not in st.session_state.watch_list:
                         st.session_state.watch_list.append(c_tick)
                         st.rerun()
-                
                 st.divider()
-                
-                st.markdown("**2️⃣ 表示と順番の変更**")
-                st.caption("※下のリストを上下にドラッグ＆ドロップして並び替えられます")
-                selected_watch = st.multiselect(
-                    "表示する銘柄",
-                    options=st.session_state.watch_list,
-                    default=st.session_state.watch_list,
-                    key="watch_select"
-                )
+                selected_watch = st.multiselect("表示する銘柄", options=st.session_state.watch_list, default=st.session_state.watch_list, key="watch_select")
                 if set(selected_watch) != set(st.session_state.watch_list):
                     new_w_list = [m for m in st.session_state.watch_list if m in selected_watch]
                     for m in selected_watch:
-                        if m not in new_w_list:
-                            new_w_list.append(m)
+                        if m not in new_w_list: new_w_list.append(m)
                     st.session_state.watch_list = new_w_list
                     st.rerun()
-
                 if st.session_state.watch_list:
                     sorted_watch = sort_items(st.session_state.watch_list, key="watch_sort_dd")
                     if sorted_watch != st.session_state.watch_list:
                         st.session_state.watch_list = sorted_watch
                         st.rerun()
 
-        # 黒背景パネル2（銘柄）
         html_watch = "<div class='dashboard-panel'>"
         if st.session_state.watch_list:
             for sym in st.session_state.watch_list:
                 try:
                     ticker = yf.Ticker(sym)
                     hist = ticker.history(period="1y")
-                    
                     if not hist.empty and len(hist) > 22:
-                        curr_p = hist['Close'].iloc[-1]
-                        prev_p = hist['Close'].iloc[-2]
+                        curr_p = hist['Close'].iloc[-1]; prev_p = hist['Close'].iloc[-2]
                         week_p = hist['Close'].iloc[-6] if len(hist) >= 6 else prev_p
                         month_p = hist['Close'].iloc[-22]
                         
-                        day_diff = curr_p - prev_p
-                        day_pct = (day_diff / prev_p) * 100
+                        day_diff = curr_p - prev_p; day_pct = (day_diff / prev_p) * 100
                         week_pct = ((curr_p - week_p) / week_p) * 100
                         month_pct = ((curr_p - month_p) / month_p) * 100
-
                         high_52 = hist['High'].max()
                         dd_52 = ((curr_p - high_52) / high_52) * 100
 
@@ -299,19 +260,13 @@ with tab_top:
                         rs = gain / loss
                         rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
                         
-                        if day_diff > 0:
-                            d_trend = f"<span class='val-up'>↑+{day_diff:.2f} (+{day_pct:.2f}%)</span>"
-                        elif day_diff < 0:
-                            d_trend = f"<span class='val-down'>↓{day_diff:.2f} ({day_pct:.2f}%)</span>"
-                        else:
-                            d_trend = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
+                        if day_diff > 0: d_trend = f"<span class='val-up'>↑+{day_diff:.2f} (+{day_pct:.2f}%)</span>"
+                        elif day_diff < 0: d_trend = f"<span class='val-down'>↓{day_diff:.2f} ({day_pct:.2f}%)</span>"
+                        else: d_trend = f"<span class='val-neutral'>±0.00 (0.00%)</span>"
 
-                        if rsi_val >= 70:
-                            rsi_stat = "<span class='val-down'>🔴 過熱</span>"
-                        elif rsi_val <= 45:
-                            rsi_stat = "<span class='val-up'>🟢 割安</span>"
-                        else:
-                            rsi_stat = "<span class='val-neutral'>⚪️ 中立</span>"
+                        if rsi_val >= 70: rsi_stat = "<span class='val-down'>🔴 過熱</span>"
+                        elif rsi_val <= 45: rsi_stat = "<span class='val-up'>🟢 割安</span>"
+                        else: rsi_stat = "<span class='val-neutral'>⚪️ 中立</span>"
                             
                         week_color = 'val-up' if week_pct > 0 else 'val-down' if week_pct < 0 else 'val-neutral'
                         month_color = 'val-up' if month_pct > 0 else 'val-down' if month_pct < 0 else 'val-neutral'
@@ -323,15 +278,14 @@ with tab_top:
                         html_watch += f"┗ <strong>RSI:</strong> {rsi_val:.1f} ({rsi_stat}) ｜ <strong>高値差:</strong> {dd_52:+.1f}%"
                         html_watch += f"</div>"
                 except:
-                    html_watch += f"<div class='item-row sym-title'>🔹 {sym}</div><div class='item-sub-row'>データ取得エラー (ティッカーを確認)</div>"
+                    html_watch += f"<div class='item-row sym-title'>🔹 {sym}</div><div class='item-sub-row'>データ取得エラー</div>"
         else:
-            html_watch += "<div class='item-row val-neutral'>表示する銘柄がありません。⚙️編集から追加してください。</div>"
+            html_watch += "<div class='item-row val-neutral'>表示する銘柄がありません。</div>"
         html_watch += "</div>"
         st.markdown(html_watch, unsafe_allow_html=True)
     
     st.write("")
     
-    # 📈 詳細チャートセクション（一覧の下に配置）
     if st.session_state.watch_list:
         for sym in st.session_state.watch_list:
             with st.expander(f"📈 {sym} の詳細チャートを開く / 閉じる"):
@@ -340,46 +294,93 @@ with tab_top:
                   <div id="tradingview_{sym}"></div>
                   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
                   <script type="text/javascript">
-                  new TradingView.widget(
-                  {{
-                  "width": "100%",
-                  "height": 400,
-                  "symbol": "{sym}",
-                  "interval": "D",
-                  "timezone": "Asia/Tokyo",
-                  "theme": "dark",
-                  "style": "1",
-                  "locale": "ja",
-                  "enable_publishing": false,
-                  "allow_symbol_change": true,
-                  "hide_top_toolbar": false,
-                  "container_id": "tradingview_{sym}"
-                }}
-                  );
+                  new TradingView.widget({{"width": "100%", "height": 400, "symbol": "{sym}", "interval": "D", "timezone": "Asia/Tokyo", "theme": "dark", "style": "1", "locale": "ja", "enable_publishing": false, "allow_symbol_change": true, "hide_top_toolbar": false, "container_id": "tradingview_{sym}"}});
                   </script>
                 </div>
                 """
                 components.html(html_code, height=400)
 
 # ==========================================
-# タブ1：全体スクリーニング（🌟 基準厳格化 ＆ AI理由付け）
+# 🌟 タブ1：全体スクリーニング（動的カスタマイズ対応）
 # ==========================================
 with tab1:
     st.write("日足（タイミング）・週足（トレンド）・ファンダ（割安性）を統合し、反発期待の銘柄を探します。")
     
+    # 📖 投資の基礎知識カンペ（アコーディオン）
+    with st.expander("📖 投資の基礎知識（各指標の意味と分析の目安）"):
+        st.markdown("""
+        **■ オシレーター系（売買のタイミングを図る）**
+        *   **RSI (相対力指数)**: 相場の過熱感（買われすぎ・売られすぎ）を0〜100で表します。
+            *   **70以上**: 買われすぎ。短期的な利確の目安になり、ここでの新規買いは警戒が必要です。
+            *   **30以下**: 売られすぎ。底打ち反転、押し目買いのチャンスになります（※本アプリの厳格基準では「40未満」を狙います）。
+        *   **MACD**: 2つの移動平均線の「差」から、トレンドの方向や転換点を読み取ります。
+            *   **ゴールデンクロス**: MACD線がシグナル線を下から上に抜いた時（強い買いサイン）。
+            *   **デッドクロス**: MACD線がシグナル線を上から下に抜いた時（強い売りサイン）。
+
+        **■ トレンド系（相場の大きな方向感を図る）**
+        *   **SMA (単純移動平均線)**: 過去一定期間の終値の平均値。現在値がこれより上なら上昇トレンドです。
+            *   **20日線**: 短期の波。 **50日線**: 中期の波。 **200日線**: 長期（約1年）の波。
+
+        **■ ファンダメンタルズ系（企業価値・割安度を図る）**
+        *   **PER (株価収益率)**: 企業の「利益」に対して、今の株価が割安かを見る指標。
+            *   **15倍以下**が一般的に割安とされます。ただしIT系などの成長企業は高くても買われる傾向があります。
+        *   **PBR (株価純資産倍率)**: 企業の「資産」に対して、今の株価が割安かを見る指標。
+            *   **1倍割れ**は、会社が解散して資産を分けた方がマシなほどの「超・割安状態」を意味します。
+        *   **ROE (自己資本利益率)**: 株主のお金を使って「どれだけ効率よく稼いだか」を表す指標。
+            *   **10〜15%以上**が、優秀な経営をしている優良企業の目安になります。
+        """)
+    
+    # ⚙️ スクリーニング指標の編集メニュー
+    col_scr1, col_scr2 = st.columns([5, 1])
+    with col_scr1:
+        st.write("")
+    with col_scr2:
+        with st.popover("⚙️ 指標の編集"):
+            st.markdown("**追加と並び替え**")
+            st.caption("※分析結果に表示させたい指標を選んでください。")
+            selected_inds = st.multiselect(
+                "表示する指標",
+                options=list(INDICATOR_MAP.keys()),
+                default=st.session_state.screener_indicators,
+                key="scr_select"
+            )
+            if set(selected_inds) != set(st.session_state.screener_indicators):
+                new_list = [m for m in st.session_state.screener_indicators if m in selected_inds]
+                for m in selected_inds:
+                    if m not in new_list: new_list.append(m)
+                st.session_state.screener_indicators = new_list
+                st.rerun()
+
+            if st.session_state.screener_indicators:
+                sorted_inds = sort_items(st.session_state.screener_indicators, key="scr_sort_dd")
+                if sorted_inds != st.session_state.screener_indicators:
+                    st.session_state.screener_indicators = sorted_inds
+                    st.rerun()
+
+    # 🚀 スクリーニング実行
     if st.button("🚀 厳選チャンス銘柄をスクリーニング"):
         with st.spinner('市場全体から厳しい条件に合う銘柄を抽出中...'):
-            # 🌟 選定基準を大幅に厳しくしたクエリ
-            q = (Query()
-                 .select('name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm', 'market_cap_basic')
-                 .where(
-                     Column('market_cap_basic') > 10_000_000_000,  # 100億ドル以上の大型・優良株限定
-                     Column('RSI') < 40,                           # RSI40未満の強い売られすぎ水準
-                     Column('volume') > 2_000_000,                 # 出来高200万以上の高流動性
-                     Column('price_earnings_ttm') > 0              # 赤字企業を排除
-                 )
-                 .order_by('RSI', ascending=True)
-                 .limit(10))
+            
+            # 動的に取得するカラム（列）を構築
+            query_cols = ['name', 'close', 'Perf.W', 'market_cap_basic', 'volume']
+            for ind in st.session_state.screener_indicators:
+                cols = INDICATOR_MAP[ind]["cols"]
+                query_cols.extend(cols)
+            # 重複を排除
+            query_cols = list(set(query_cols))
+            
+            # 最低限の厳格フィルター（優良大型株 ＆ 流動性 ＆ 黒字企業）
+            conditions = [
+                Column('market_cap_basic') > 10_000_000_000,
+                Column('volume') > 2_000_000,
+                Column('price_earnings_ttm') > 0
+            ]
+            
+            # RSIが含まれている場合は、RSI40未満の厳格条件も追加
+            if "RSI (14日)" in st.session_state.screener_indicators:
+                conditions.append(Column('RSI') < 40)
+                
+            q = (Query().select(*query_cols).where(*conditions).order_by('market_cap_basic', ascending=False).limit(10))
             
             try:
                 df = q.set_markets('america').get_scanner_data()[1]
@@ -387,48 +388,78 @@ with tab1:
                 df = pd.DataFrame()
             
             if not df.empty:
-                df = df[['name', 'close', 'RSI', 'MACD.macd', 'MACD.signal', 'Perf.W', 'price_earnings_ttm']]
-                df.columns = ['ティッカー', '現在値($)', '日足RSI', '日足MACD', '日足シグナル', '週足パフォーマンス(%)', 'PER(倍)']
-                
-                df['日足RSI'] = pd.to_numeric(df['日足RSI'], errors='coerce').round(1)
-                df['日足MACD'] = pd.to_numeric(df['日足MACD'], errors='coerce').round(2)
-                df['日足シグナル'] = pd.to_numeric(df['日足シグナル'], errors='coerce').round(2)
-                df['週足パフォーマンス(%)'] = pd.to_numeric(df['週足パフォーマンス(%)'], errors='coerce').round(1)
-                df['PER(倍)'] = pd.to_numeric(df['PER(倍)'], errors='coerce').round(1)
-                
                 st.success("🎯 厳格なスクリーニングを通過した銘柄です！")
                 
                 for index, row in df.iterrows():
-                    st.markdown(f"### 📌 {row['ティッカー']} (現在値: ${row['現在値($)']})")
+                    st.markdown(f"### 📌 {row['name']} (現在値: ${row.get('close', 0):.2f})")
                     
-                    # 🌟 明確な理由付けの文章生成ロジック
+                    metrics_strs = []
                     reasons = []
                     
-                    # 1. RSIからの視点
-                    if row['日足RSI'] < 30:
-                        reasons.append(f"**RSIが{row['日足RSI']}**と極度の売られすぎ水準にあり、短期的な反発余地が大きい状態です。")
-                    else:
-                        reasons.append(f"**RSIが{row['日足RSI']}**で十分に調整が進んでおり、押し目買いの好機と判断できます。")
+                    # 常に表示
+                    perf_w = row.get('Perf.W')
+                    if pd.notna(perf_w):
+                        metrics_strs.append(f"前週比: {perf_w:.1f}%")
+                    
+                    # ユーザーが選んだ指標を動的に判定・表示
+                    for ind in st.session_state.screener_indicators:
+                        if ind == "RSI (14日)":
+                            val = row.get('RSI')
+                            if pd.notna(val):
+                                metrics_strs.append(f"RSI: {val:.1f}")
+                                if val < 30: reasons.append(f"**RSIが{val:.1f}**と極度の売られすぎ水準にあり、短期的な反発余地が大きい状態です。")
+                                else: reasons.append(f"**RSIが{val:.1f}**で十分に調整が進んでおり、押し目買いの好機です。")
                         
-                    # 2. MACDからの視点
-                    if pd.notna(row['日足MACD']) and pd.notna(row['日足シグナル']):
-                        if row['日足MACD'] > row['日足シグナル']:
-                            reasons.append("日足MACDがシグナルを上抜け（**ゴールデンクロス**）しており、トレンド反転の強いサインが点灯しています。")
-                        else:
-                            reasons.append("MACDはまだ下落トレンドを示しているため、**打診買い（少なめ）**から入るか、反発を確認してからのエントリーが安全です。")
-                            
-                    # 3. PER（ファンダメンタルズ）からの視点
-                    if pd.notna(row['PER(倍)']):
-                        if row['PER(倍)'] < 15:
-                            reasons.append(f"**PERが{row['PER(倍)']}倍**と市場平均より非常に割安な水準であり、下値不安が限定的です。")
-                        elif row['PER(倍)'] < 25:
-                            reasons.append(f"**PERが{row['PER(倍)']}倍**と適正水準であり、業績の裏付けを持った大型株です。")
-                        else:
-                            reasons.append(f"PERは{row['PER(倍)']}倍とやや高めですが、成長期待が織り込まれている銘柄です。")
-                            
-                    # データと理由を画面に出力
-                    st.markdown(f"- **指標データ:** 日足RSI: {row['日足RSI']} ｜ MACD: {row['日足MACD']} ｜ PER: {row['PER(倍)']}倍 ｜ 前週比: {row['週足パフォーマンス(%)']}%")
-                    st.info("💡 **AI選定理由:**\n\n" + "\n".join([f"- {r}" for r in reasons]))
+                        elif ind == "MACD":
+                            macd = row.get('MACD.macd')
+                            sig = row.get('MACD.signal')
+                            if pd.notna(macd) and pd.notna(sig):
+                                metrics_strs.append(f"MACD: {macd:.2f}")
+                                if macd > sig: reasons.append("MACDがシグナルを上抜け（**ゴールデンクロス**）しており、トレンド反転の買いサインが点灯中です。")
+                                else: reasons.append("MACDはまだ下向きのため、反発を確認してからの打診買いが安全です。")
+                        
+                        elif ind == "PER (株価収益率)":
+                            val = row.get('price_earnings_ttm')
+                            if pd.notna(val):
+                                metrics_strs.append(f"PER: {val:.1f}倍")
+                                if val < 15: reasons.append(f"**PERが{val:.1f}倍**と割安な水準であり、下値不安が限定的です。")
+                                elif val < 25: reasons.append(f"**PERが{val:.1f}倍**と適正水準であり、業績の裏付けを持った銘柄です。")
+                                else: reasons.append(f"PERは{val:.1f}倍とやや高めですが、成長期待が織り込まれています。")
+                                
+                        elif ind == "PBR (株価純資産倍率)":
+                            val = row.get('price_book_ratio')
+                            if pd.notna(val):
+                                metrics_strs.append(f"PBR: {val:.2f}倍")
+                                if val < 1.0: reasons.append(f"**PBRが{val:.2f}倍**と「1倍割れ」の超割安水準に放置されています。")
+                                else: reasons.append(f"PBRは{val:.2f}倍で、極端な割高感はありません。")
+                                
+                        elif ind == "ROE (自己資本利益率)":
+                            val = row.get('return_on_equity')
+                            if pd.notna(val):
+                                metrics_strs.append(f"ROE: {val:.1f}%")
+                                if val > 15: reasons.append(f"**ROEが{val:.1f}%**と非常に高く、効率よく利益を稼ぐ超優秀な企業です。")
+                                elif val > 10: reasons.append(f"**ROEが{val:.1f}%**で、基準となる10%をクリアした優良企業です。")
+                                
+                        elif "SMA" in ind:
+                            col_name = INDICATOR_MAP[ind]["cols"][0]
+                            val = row.get(col_name)
+                            curr = row.get('close')
+                            if pd.notna(val) and pd.notna(curr):
+                                metrics_strs.append(f"{ind.split(' ')[0]}: ${val:.2f}")
+                                if curr > val: reasons.append(f"現在値が{ind}（${val:.2f}）を**上回って推移**しており、強いトレンドを維持しています。")
+                                else: reasons.append(f"現在値が{ind}（${val:.2f}）を下回っており、上値が重い調整局面が続いています。")
+                                
+                        elif ind == "配当利回り(%)":
+                            val = row.get('dividend_yield_recent')
+                            if pd.notna(val):
+                                metrics_strs.append(f"配当利回り: {val:.2f}%")
+                                if val > 3.0: reasons.append(f"**配当利回りが{val:.2f}%**と高く、下落時のクッション（インカムゲイン）が期待できます。")
+                    
+                    if not reasons:
+                        reasons.append("現在の設定指標からは、特筆すべき強いシグナルは見当たりません。")
+
+                    st.markdown(f"- **取得データ:** " + " ｜ ".join(metrics_strs))
+                    st.info("💡 **AI分析結果:**\n\n" + "\n".join([f"- {r}" for r in reasons]))
                     st.divider()
             else:
                 st.warning("現在、厳しい条件を全て満たす銘柄は見つかりませんでした。（相場全体が過熱しているか、優良な押し目がない状態です。無駄なトレードを避け、静観を推奨します）")
