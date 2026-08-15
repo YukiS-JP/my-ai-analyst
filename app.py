@@ -638,10 +638,10 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー
+# 🎯 タブ2：個別銘柄トラッカー（日足・週足 ダブル分析対応版）
 # ==========================================
 with tab2:
-    st.write(f"監視中の特定銘柄の状況を確認し、**仮想売買の判定をスプレッドシートに記録**します。")
+    st.write(f"監視中の特定銘柄の状況を確認し、**スイング（中期）と長期投資（ガチホ）のダブル判定**を行います。")
 
     with st.form(key=f"add_ticker_form_{is_us}", clear_on_submit=True):
         col_f1, col_f2 = st.columns([3, 1])
@@ -696,32 +696,58 @@ with tab2:
                 hist = pd.DataFrame()
                 for attempt in range(3):
                     try:
-                        hist = yf.Ticker(sym).history(period="6mo")
+                        # 🌟 長期（週足）を正確に計算するため、取得期間を一気に「2年」へ拡張！
+                        hist = yf.Ticker(sym).history(period="2y")
                         if not hist.empty: break 
                         time.sleep(0.5) 
                     except: time.sleep(0.5)
                 if hist.empty: continue
                 try:
-                    close = hist['Close'].iloc[-1]; delta = hist['Close'].diff()
-                    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-                    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-                    rs = gain / loss; rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
-                    macd = hist['Close'].ewm(span=12, adjust=False).mean() - hist['Close'].ewm(span=26, adjust=False).mean()
-                    macd_signal = macd.ewm(span=9, adjust=False).mean()
-                    macd_val = macd.iloc[-1]; sig_val = macd_signal.iloc[-1]
+                    close = hist['Close'].iloc[-1]
                     perf_w = ((close - hist['Close'].iloc[-6]) / hist['Close'].iloc[-6]) * 100 if len(hist) >= 6 else np.nan
+
+                    # --- 日足（スイング・中期向け）の計算 ---
+                    delta_d = hist['Close'].diff()
+                    gain_d = (delta_d.where(delta_d > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                    loss_d = (-delta_d.where(delta_d < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                    rsi_d = (100 - (100 / (1 + gain_d / loss_d))).iloc[-1]
                     
-                    if rsi_val > 70: signal = f"🔴【仮想売】RSIが{rsi_val:.1f}と過熱圏に達しました。利益確定を推奨します。"
-                    elif macd_val < sig_val: signal = f"🔵【仮想売】MACDがデッドクロスしました。撤退推奨です。"
-                    elif rsi_val < 45 and macd_val > sig_val: signal = f"🟢【仮想買】割安水準でMACDが上向きました。絶好の押し目買いチャンスです。"
+                    macd_d = hist['Close'].ewm(span=12, adjust=False).mean() - hist['Close'].ewm(span=26, adjust=False).mean()
+                    sig_d = macd_d.ewm(span=9, adjust=False).mean()
+
+                    # --- 週足（ガチホ・長期向け）の計算 ---
+                    hist_w = hist.resample('W-FRI').agg({'Close':'last'}).dropna()
+                    if len(hist_w) > 26:
+                        delta_w = hist_w['Close'].diff()
+                        gain_w = (delta_w.where(delta_w > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                        loss_w = (-delta_w.where(delta_w < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                        rsi_w = (100 - (100 / (1 + gain_w / loss_w))).iloc[-1]
+                        
+                        macd_w = hist_w['Close'].ewm(span=12, adjust=False).mean() - hist_w['Close'].ewm(span=26, adjust=False).mean()
+                        sig_w = macd_w.ewm(span=9, adjust=False).mean()
                     else:
-                        if rsi_val < 45: signal = f"⚪️【静観】RSIは割安ですが、MACDが下向きのため反転確認待ちです。"
-                        elif macd_val > sig_val: signal = f"⚪️【静観】MACDは上向きですが、RSIが割安基準に達していません。"
-                        else: signal = f"⚪️【静観】RSIが{rsi_val:.1f}で中立圏。次の波を待つ局面です。"
+                        rsi_w = np.nan
+                        macd_w = pd.Series([np.nan])
+                        sig_w = pd.Series([np.nan])
+
+                    # --- 🎯 スイング（中期）の判定ロジック ---
+                    if rsi_d > 70: swing_sig = f"🔴【利確推奨】日足RSI過熱({rsi_d:.1f})。スイング枠は利益確定の目安です。"
+                    elif macd_d.iloc[-1] < sig_d.iloc[-1]: swing_sig = f"🔵【様子見】日足MACDがデッドクロス中。下落トレンドです。"
+                    elif rsi_d < 45 and macd_d.iloc[-1] > sig_d.iloc[-1]: swing_sig = f"🟢【短期買】日足割安水準でMACD好転。スイングの絶好の押し目です。"
+                    else: swing_sig = f"⚪️【静観】日足は中立圏。スイングは次の波を待つ局面です。"
+
+                    # --- 🔭 長期投資（ガチホ）の判定ロジック ---
+                    if pd.isna(rsi_w): long_sig = "データ不足により長期判定不可"
+                    elif rsi_w > 70: long_sig = f"🔴【警戒】週足RSI過熱({rsi_w:.1f})。長期保有枠の一部利確も検討水準です。"
+                    elif macd_w.iloc[-1] < sig_w.iloc[-1]: long_sig = f"🔵【忍耐】週足MACD調整中。長期投資なら焦らず安値を拾うか放置する時期です。"
+                    elif rsi_w < 45 and macd_w.iloc[-1] > sig_w.iloc[-1]: long_sig = f"🟢【長期買】週足底打ちサイン。数年スパンでの強力な仕込み時です。"
+                    else: long_sig = f"⚪️【ガチホ】週足は安定トレンド。長期枠はそのままホールド推奨です。"
                         
                     st.session_state[tracker_data_key].append({
-                        'ティッカー': disp_name, 'sym': sym, '現在値': close, '日足RSI': rsi_val, 
-                        'MACD': macd_val, '週足パフォーマンス(%)': perf_w, '💡 AI判定': signal
+                        'ティッカー': disp_name, 'sym': sym, '現在値': close, 
+                        '日足RSI': rsi_d, '週足RSI': rsi_w,
+                        '週足パフォーマンス(%)': perf_w, 
+                        'swing_sig': swing_sig, 'long_sig': long_sig
                     })
                 except Exception as e: pass
             
@@ -731,8 +757,13 @@ with tab2:
     if current_tracker_data:
         for data in current_tracker_data:
             st.markdown(f"### 📌 {data['ティッカー']} (現在値: {curr_sym}{data['現在値']:,.2f})")
-            st.markdown(f"- **日足RSI:** {data['日足RSI']:.1f}  |  **週足パフォーマンス:** {data['週足パフォーマンス(%)']:.1f}%")
-            st.info(f"**{data['💡 AI判定']}**"); st.divider()
+            rsi_w_str = f"{data['週足RSI']:.1f}" if pd.notna(data['週足RSI']) else "N/A"
+            st.markdown(f"- **日足RSI:** {data['日足RSI']:.1f}  |  **週足RSI:** {rsi_w_str}  |  **週足パフォーマンス:** {data['週足パフォーマンス(%)']:.1f}%")
+            
+            # 🌟 ダブル判定の表示
+            st.info(f"**🎯 スイング（中期）:** {data['swing_sig']}")
+            st.success(f"**🔭 長期（ガチホ）:** {data['long_sig']}")
+            st.divider()
 
         st.write("")
         if check_already_saved(market_mode, current_market_date, sheet_type="tracker"):
@@ -747,14 +778,17 @@ with tab2:
                         sheet = client.open_by_url(SHEET_URL).sheet1
                         
                         for data in current_tracker_data:
+                            # スプレッドシートにはスイングと長期の判定を合体させて保存
+                            combined_sig = f"[中期] {data['swing_sig']} \n [長期] {data['long_sig']}"
+                            
                             row = [
                                 now_jst.strftime('%Y/%m/%d %H:%M'), 
                                 f"{market_mode.split(' ')[0]} {data['sym']}", 
                                 round(data['現在値'], 2), 
                                 round(data['日足RSI'], 1), 
-                                round(data['MACD'], 2), 
+                                round(data['週足RSI'], 1) if pd.notna(data['週足RSI']) else "", 
                                 round(data['週足パフォーマンス(%)'], 1) if pd.notna(data['週足パフォーマンス(%)']) else "", 
-                                data['💡 AI判定']
+                                combined_sig
                             ]
                             sheet.append_row(row)
                         
