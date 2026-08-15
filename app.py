@@ -210,7 +210,6 @@ if 'watch_list_jp' not in st.session_state: st.session_state.watch_list_jp = loa
 if 'portfolio_us' not in st.session_state: st.session_state.portfolio_us = load_portfolio_from_cloud("US")
 if 'portfolio_jp' not in st.session_state: st.session_state.portfolio_jp = load_portfolio_from_cloud("JP")
 
-if 'company_names' not in st.session_state: st.session_state.company_names = {} 
 if 'last_screened_data' not in st.session_state: st.session_state.last_screened_data = [] 
 
 if 'last_tracker_data_us' not in st.session_state: st.session_state.last_tracker_data_us = []
@@ -262,27 +261,35 @@ INDICATOR_MAP = {
     "配当利回り(%)": {"cols": ["dividend_yield_recent"]}
 }
 
+# 🌟 直近で追加された企業などを内蔵辞書に追加（ここで100%ヒットさせる）
 JP_COMPANY_NAMES = {
     "7203.T": "トヨタ自動車", "1959.T": "九電工", "8035.T": "東京エレクトロン",
     "9984.T": "ソフトバンクグループ", "6758.T": "ソニーグループ", "9432.T": "日本電信電話",
     "8306.T": "三菱UFJフィナンシャル・グループ", "6857.T": "アドバンテスト",
-    "9983.T": "ファーストリテイリング", "6594.T": "ニデック"
+    "9983.T": "ファーストリテイリング", "6594.T": "ニデック",
+    "1969.T": "高砂熱学工業", "1963.T": "日揮ホールディングス", "3402.T": "東レ",
+    "6258.T": "平田機工", "6368.T": "オルガノ", "4980.T": "デクセリアルズ"
 }
 
-def get_company_name(sym):
-    if is_us: return sym
-    clean_sym = sym.strip().upper()
-    if clean_sym in JP_COMPANY_NAMES: return f"{clean_sym} {JP_COMPANY_NAMES[clean_sym]}"
-    if clean_sym in st.session_state.company_names: return f"{clean_sym} {st.session_state.company_names[clean_sym]}"
+# 🌟 PCとスマホ（サーバー全体）で翻訳結果を共有するグローバルキャッシュ機能
+@st.cache_data(ttl=timedelta(days=30))
+def fetch_company_name_from_yf(clean_sym):
     try:
         info = yf.Ticker(clean_sym).info
         name_en = info.get('shortName') or info.get('longName') or ""
         if name_en:
             name_ja = GoogleTranslator(source='en', target='ja').translate(name_en)
-            st.session_state.company_names[clean_sym] = name_ja
             return f"{clean_sym} {name_ja}"
         return clean_sym
-    except: return clean_sym
+    except: 
+        return clean_sym
+
+def get_company_name(sym):
+    if is_us: return sym
+    clean_sym = sym.strip().upper()
+    if clean_sym in JP_COMPANY_NAMES: return f"{clean_sym} {JP_COMPANY_NAMES[clean_sym]}"
+    # 辞書になければグローバルキャッシュから取得（PCで取得済みならスマホは1ミリ秒で完了）
+    return fetch_company_name_from_yf(clean_sym)
 
 now_utc = datetime.utcnow()
 current_market_date = (now_utc - timedelta(hours=5)).strftime('%Y-%m-%d') if is_us else (now_utc + timedelta(hours=9)).strftime('%Y-%m-%d')
@@ -483,7 +490,6 @@ with tab_top:
     if watch_list:
         for sym in watch_list:
             disp_name = get_company_name(sym)
-            # 🌟 修正ポイント：日本株の場合はTradingViewがブロックするため、Yahoo Financeのチャートリンクに変更
             with st.expander(f"📈 {disp_name} の詳細チャートを開く / 閉じる"):
                 if is_us:
                     html_code = f"""<div class="tradingview-widget-container"><div id="tradingview_{sym}"></div><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"width": "100%", "height": 400, "symbol": "{sym}", "interval": "D", "timezone": "Asia/Tokyo", "theme": "dark", "style": "1", "locale": "ja", "enable_publishing": false, "allow_symbol_change": true, "hide_top_toolbar": false, "container_id": "tradingview_{sym}"}});</script></div>"""
@@ -770,7 +776,6 @@ with tab2:
             st.info(f"**🎯 スイング（中期）:** {data['swing_sig']}")
             st.success(f"**🔭 長期（ガチホ）:** {data['long_sig']}")
             
-            # 🌟 修正ポイント：日本株の場合はTradingViewがブロックするため、Yahoo Financeのチャートリンクに変更
             with st.expander(f"📈 {disp_name} のチャートを見る"):
                 if is_us:
                     html_code = f"""<div class="tradingview-widget-container"><div id="tradingview_t2_{sym}"></div><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"width": "100%", "height": 400, "symbol": "{sym}", "interval": "D", "timezone": "Asia/Tokyo", "theme": "dark", "style": "1", "locale": "ja", "enable_publishing": false, "allow_symbol_change": true, "hide_top_toolbar": false, "container_id": "tradingview_t2_{sym}"}});</script></div>"""
