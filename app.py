@@ -482,7 +482,9 @@ with tab_top:
     st.write("")
     if watch_list:
         for sym in watch_list:
-            disp_name = get_company_name(sym); tv_sym = sym.replace('.T', '') if not is_us else sym
+            disp_name = get_company_name(sym)
+            # 🌟 修正ポイント：トップ画面の日本株チャートに「TSE:」を強制付与
+            tv_sym = f"TSE:{sym.replace('.T', '')}" if not is_us else sym
             with st.expander(f"📈 {disp_name} の詳細チャートを開く / 閉じる"):
                 html_code = f"""<div class="tradingview-widget-container"><div id="tradingview_{tv_sym}"></div><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"width": "100%", "height": 400, "symbol": "{tv_sym}", "interval": "D", "timezone": "Asia/Tokyo", "theme": "dark", "style": "1", "locale": "ja", "enable_publishing": false, "allow_symbol_change": true, "hide_top_toolbar": false, "container_id": "tradingview_{tv_sym}"}});</script></div>"""
                 components.html(html_code, height=400)
@@ -756,7 +758,8 @@ with tab2:
     if current_tracker_data:
         for data in current_tracker_data:
             sym = data['sym']
-            tv_sym = sym.replace('.T', '') if not is_us else sym
+            # 🌟 修正ポイント：トラッカー画面の日本株チャートにも「TSE:」を強制付与
+            tv_sym = f"TSE:{sym.replace('.T', '')}" if not is_us else sym
             disp_name = data['ティッカー']
             
             st.markdown(f"### 📌 {disp_name} (現在値: {curr_sym}{data['現在値']:,.2f})")
@@ -766,7 +769,6 @@ with tab2:
             st.info(f"**🎯 スイング（中期）:** {data['swing_sig']}")
             st.success(f"**🔭 長期（ガチホ）:** {data['long_sig']}")
             
-            # 🌟 新機能：トラッカー内に各銘柄のチャート確認ボタン（アコーディオン）を追加
             with st.expander(f"📈 {disp_name} のチャートを見る"):
                 html_code = f"""<div class="tradingview-widget-container"><div id="tradingview_t2_{tv_sym}"></div><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"width": "100%", "height": 400, "symbol": "{tv_sym}", "interval": "D", "timezone": "Asia/Tokyo", "theme": "dark", "style": "1", "locale": "ja", "enable_publishing": false, "allow_symbol_change": true, "hide_top_toolbar": false, "container_id": "tradingview_t2_{tv_sym}"}});</script></div>"""
                 components.html(html_code, height=400)
