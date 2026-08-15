@@ -638,7 +638,7 @@ with tab1:
                     except Exception as e: st.error(f"保存に失敗しました: {e}")
 
 # ==========================================
-# 🎯 タブ2：個別銘柄トラッカー（日足・週足 ダブル分析対応版）
+# 🎯 タブ2：個別銘柄トラッカー
 # ==========================================
 with tab2:
     st.write(f"監視中の特定銘柄の状況を確認し、**スイング（中期）と長期投資（ガチホ）のダブル判定**を行います。")
@@ -696,7 +696,6 @@ with tab2:
                 hist = pd.DataFrame()
                 for attempt in range(3):
                     try:
-                        # 🌟 長期（週足）を正確に計算するため、取得期間を一気に「2年」へ拡張！
                         hist = yf.Ticker(sym).history(period="2y")
                         if not hist.empty: break 
                         time.sleep(0.5) 
@@ -756,13 +755,22 @@ with tab2:
     current_tracker_data = st.session_state[tracker_data_key]
     if current_tracker_data:
         for data in current_tracker_data:
-            st.markdown(f"### 📌 {data['ティッカー']} (現在値: {curr_sym}{data['現在値']:,.2f})")
+            sym = data['sym']
+            tv_sym = sym.replace('.T', '') if not is_us else sym
+            disp_name = data['ティッカー']
+            
+            st.markdown(f"### 📌 {disp_name} (現在値: {curr_sym}{data['現在値']:,.2f})")
             rsi_w_str = f"{data['週足RSI']:.1f}" if pd.notna(data['週足RSI']) else "N/A"
             st.markdown(f"- **日足RSI:** {data['日足RSI']:.1f}  |  **週足RSI:** {rsi_w_str}  |  **週足パフォーマンス:** {data['週足パフォーマンス(%)']:.1f}%")
             
-            # 🌟 ダブル判定の表示
             st.info(f"**🎯 スイング（中期）:** {data['swing_sig']}")
             st.success(f"**🔭 長期（ガチホ）:** {data['long_sig']}")
+            
+            # 🌟 新機能：トラッカー内に各銘柄のチャート確認ボタン（アコーディオン）を追加
+            with st.expander(f"📈 {disp_name} のチャートを見る"):
+                html_code = f"""<div class="tradingview-widget-container"><div id="tradingview_t2_{tv_sym}"></div><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><script type="text/javascript">new TradingView.widget({{"width": "100%", "height": 400, "symbol": "{tv_sym}", "interval": "D", "timezone": "Asia/Tokyo", "theme": "dark", "style": "1", "locale": "ja", "enable_publishing": false, "allow_symbol_change": true, "hide_top_toolbar": false, "container_id": "tradingview_t2_{tv_sym}"}});</script></div>"""
+                components.html(html_code, height=400)
+                
             st.divider()
 
         st.write("")
@@ -778,7 +786,6 @@ with tab2:
                         sheet = client.open_by_url(SHEET_URL).sheet1
                         
                         for data in current_tracker_data:
-                            # スプレッドシートにはスイングと長期の判定を合体させて保存
                             combined_sig = f"[中期] {data['swing_sig']} \n [長期] {data['long_sig']}"
                             
                             row = [
